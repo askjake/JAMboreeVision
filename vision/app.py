@@ -49,6 +49,12 @@ def create_app(data_dir=None):
     app.view_functions['remote_page'] = lambda: send_from_directory(STATIC, 'index.html')
     app.view_functions['settops_page'] = lambda: send_from_directory(STATIC, 'index.html')
 
+    @app.after_request
+    def fresh_ui(response):
+        if request.path in {'/', '/settops'} or request.path.startswith('/vision-static/'):
+            response.headers['Cache-Control'] = 'no-store, max-age=0'
+        return response
+
     def body():
         data = request.get_json()
         if not isinstance(data, dict):

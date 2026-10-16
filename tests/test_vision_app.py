@@ -120,3 +120,11 @@ def test_gui_import_file_size_and_bare_alias_table(client):
     assert client.post('/api/vision/import',json={'config':{'Bare':{'protocol':'RF','remote':1}},'preview':False}).status_code==200
     oversized='x'*(2*1024*1024+1)
     assert client.post('/api/vision/import',data=oversized,content_type='application/json').status_code==413
+
+
+def test_updated_ui_is_not_cached(client):
+    for path in ['/', '/settops', '/vision-static/app.js', '/vision-static/style.css']:
+        response=client.get(path)
+        assert response.status_code==200
+        assert 'no-store' in response.headers['Cache-Control']
+    assert 'id="import-config"' in client.get('/').text
