@@ -16,4 +16,15 @@ d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#com
 d.querySelector('#watch-linked').click();await wait(()=>d.querySelectorAll('video').length===1);
 const j=await(await fetch(cfg.url+'/_test/commands')).json();assert.equal(j.commands[0].args[1],'DOM Hopper');assert.equal(j.commands[0].args[2],'guide');
 assert.equal(d.querySelector('.video-head strong').textContent,'DOM Remote-stream');assert.equal(d.querySelector('#toast').className,'');await wait(()=>d.querySelector('#video-count').textContent==='1 selected');console.log('PASS: DOM UI bootstrap, settop/stream/remote forms, persistent links, selected video window, command dispatch');
+
+const picker=d.querySelector('#config-file');let pickerClicked=false;picker.click=()=>{pickerClicked=true};d.querySelector('#import-config').click();assert.equal(pickerClicked,true);
+const config=JSON.stringify({stbs:{'Imported Hopper':{protocol:'SGS',ip:'192.0.2.1'}}});
+async function choose(text){Object.defineProperty(picker,'files',{configurable:true,value:[{name:'base.txt',size:text.length,text:async()=>text}]});await picker.onchange();}
+await choose(config);assert.equal(d.querySelector('#apply-import').disabled,false);assert.match(d.querySelector('#import-summary').textContent,/1 settops to add/);
+let inventory=await(await fetch(cfg.url+'/api/vision/state')).json();assert.equal(inventory.stbs['Imported Hopper'],undefined);
+d.querySelector('#cancel-import').click();assert.equal(d.querySelector('#import-dialog').open,false);
+await choose(config);d.querySelector('#apply-import').click();await wait(()=>!d.querySelector('#import-dialog').open);await wait(()=>d.querySelector('#remote-table').textContent.includes('Imported Hopper'));await wait(()=>d.querySelector('#cancel-import').disabled===false);
+await choose(config);assert.match(d.querySelector('#import-summary').textContent,/0 settops to add, 1 existing settops skipped/);d.querySelector('#cancel-import').click();
+await choose('{invalid');assert.equal(d.querySelector('#apply-import').disabled,true);assert.match(d.querySelector('#import-error').textContent,/not valid JSON/);d.querySelector('#cancel-import').click();
+console.log('PASS: import button opens file input; local file preview, cancel, apply, repeated import, invalid JSON');
 }finally{dom?.window.close();if(cfg){try{await fetch(cfg.url+'/_test/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch{fixture.kill('SIGTERM')}}else fixture.kill('SIGTERM')}})().catch(e=>{console.error(e);process.exitCode=1});

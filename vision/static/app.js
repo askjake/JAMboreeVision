@@ -56,3 +56,29 @@ $('#discovery-form').onsubmit=run(async e=>{e.preventDefault();const d=Object.fr
 function renderScan(j){if(!j)return;$('#scan-status').textContent=j.state==='idle'?'No scan running.':`${j.state} · ${j.completed}/${j.total} checked · ${j.found.length} video streams found${j.last_error?' · Last probe: '+j.last_error:''}`;const box=$('#scan-results');box.replaceChildren();for(const s of j.found){const row=el('div',undefined,'result'),saved=state.streams.some(x=>x.url===s.url);row.append(el('span',s.url),button(saved?'Saved':'Add stream',()=>editStream({url:s.url,name:new URL(s.url).pathname.split('/').filter(Boolean).pop()||'Video'})));if(saved)row.querySelector('button').disabled=true;box.append(row);}$('#cancel-scan').disabled=j.state!=='running';}
 async function pollScan(){try{const j=await api('/api/vision/discovery');renderScan(j);if(j.state==='running')setTimeout(pollScan,1500);}catch(e){notice(e.message,true);}}
 run(async()=>{await refresh();const cfg=state.discovery_config;for(const [k,v] of Object.entries(cfg))if($('#discovery-form').elements[k])$('#discovery-form').elements[k].value=v;const initial=location.hash.slice(1)|| (location.pathname==='/settops'?'assets':'console');tab(['console','assets','streams'].includes(initial)?initial:'console');if(state.discovery.state==='running')pollScan();})();
+
+// The picker reads a file on the browser's computer, including for LAN clients.
+let pendingImport=null, importBusy=false, importGeneration=0;
+$('#import-config').onclick=()=>$('#config-file').click();
+function importSummary(s){return `${s.settops_added} settops to add, ${s.settops_skipped} existing settops skipped; ${s.remotes_added} remotes to add; ${s.streams_added} streams to add, ${s.streams_skipped} existing streams skipped.${s.credential_fields_omitted?' Credential fields omitted: '+s.credential_fields_omitted+'.':''}`;}
+$('#config-file').onchange=async()=>{
+ const picker=$('#config-file'),file=picker.files[0];picker.value='';if(!file)return;
+ const generation=++importGeneration;pendingImport=null;$('#apply-import').disabled=true;$('#import-error').textContent='';$('#import-summary').textContent='Reading and validating…';$('#import-filename').textContent=file.name;$('#import-dialog').showModal();
+ try{
+  if(file.size>1024*1024)throw Error('Choose a configuration file smaller than 1 MiB.');
+  const text=await file.text();if(generation!==importGeneration)return;
+  try{pendingImport=JSON.parse(text.replace(/^\uFEFF/,''));}catch{throw Error('This file is not valid JSON. Select a JAMboreeLite base.txt or a JSON configuration.');}
+  const j=await api('/api/vision/import','POST',{config:pendingImport,preview:true});
+  if(generation!==importGeneration)return;
+  if(!$('#import-dialog').open){pendingImport=null;return;}
+  $('#import-summary').textContent=importSummary(j.summary);$('#apply-import').disabled=false;
+ }catch(e){if(generation!==importGeneration)return;pendingImport=null;$('#import-summary').textContent='';$('#import-error').textContent=e.message;}
+};
+$('#cancel-import').onclick=()=>{if(!importBusy){importGeneration++;pendingImport=null;$('#import-dialog').close();}};
+$('#import-dialog').addEventListener('cancel',e=>{if(importBusy)e.preventDefault();else {importGeneration++;pendingImport=null;}});
+$('#apply-import').onclick=async()=>{
+ if(!pendingImport||importBusy)return;importBusy=true;$('#apply-import').disabled=true;$('#cancel-import').disabled=true;
+ try{const j=await api('/api/vision/import','POST',{config:pendingImport,preview:false});pendingImport=null;$('#import-dialog').close();await refresh();notice(`Imported ${j.summary.settops_added} settops, ${j.summary.remotes_added} remotes, and ${j.summary.streams_added} streams.`);}
+ catch(e){$('#import-error').textContent=e.message;$('#apply-import').disabled=false;}
+ finally{importBusy=false;$('#cancel-import').disabled=false;}
+};

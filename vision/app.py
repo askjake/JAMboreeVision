@@ -109,6 +109,20 @@ def create_app(data_dir=None):
 
     app.view_functions['save_stb_list'] = legacy_save_guard
 
+    @app.post('/api/vision/import')
+    def import_config():
+        from .config_import import plan_import, apply_import
+        data = body()
+        if not isinstance(data.get('preview', True), bool):
+            raise ValueError('preview must be a boolean')
+        with asset_lock:
+            plan = plan_import(data.get('config'), store, assets)
+            if data.get('preview', True):
+                return jsonify(ok=True, preview=True, summary=plan['summary'])
+            summary = apply_import(plan, store, assets)
+            init_serial_from_base(store.document())
+            return jsonify(ok=True, preview=False, summary=summary)
+
     @app.get('/api/vision/state')
     def state():
         remotes = assets.list('remotes')

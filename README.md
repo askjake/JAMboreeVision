@@ -29,7 +29,34 @@ Stop with **Ctrl+C** in its terminal. Future starts: `start.cmd`, or `powershell
 
 For runtime-only installation, `requirements.txt` suffices. The development and OCR requirements above enable the full upstream regression suite. Optional OCR automatic pairing additionally requires an installed Tesseract executable and a configured frame provider; manual PIN pairing works without it. Linked playback is not automatically used as an OCR frame source.
 
-## Import existing assets (stop Vision first)
+## Import configuration through the GUI
+
+Open **Settops & remotes → Import config…**. Your operating system's file picker opens; browse to a local `.txt` or `.json` file and select it. Review the import counts, then click **Import configuration**. No restart is required. When using Vision over the LAN, the selected file comes from the computer running your browser and is sent to the Vision server.
+
+Supported files (UTF-8 JSON, up to 1 MiB):
+
+- JAMboreeLite `base.txt` with a `stbs` object, or a bare alias-to-settop object.
+- JSON containing `stbs`, `streams`, or both. Each stream needs `name` and `url`; optional `mode` is `copy` or `transcode`.
+
+```json
+{
+  "stbs": {
+    "Bench Hopper": {
+      "stb": "R0000000000", "ip": "192.168.1.50",
+      "protocol": "SGS", "remote": "1", "role": "hopper"
+    }
+  },
+  "streams": [
+    {"name": "Bench video", "url": "rtmp://192.168.1.60:1935/live0", "mode": "copy"}
+  ]
+}
+```
+
+Existing settop aliases and stream URLs are skipped. Existing configuration and remote links are preserved. Imported settops receive a remote if they do not already have one. Select the corresponding stream link afterward. A stream name already assigned to another URL is reported before importing. Reimporting the same file does not duplicate assets. The preview is recalculated on import to account for intervening changes.
+
+The browser importer omits top-level credential fields from settop entries and does not import certificates/private keys; use the existing OS keyring or pair through the GUI. It imports asset tables, not arbitrary global configuration or executable launcher scripts. Sling-viewer's Python/PowerShell files are not JSON configuration files; add its URLs through discovery, the JSON format above, or the CLI below.
+
+## Import existing assets through the CLI (stop Vision first)
 
 No import or network scan happens automatically. Import from your own local files; the original installation is not modified. Substitute your actual JAMboreeLite path:
 
@@ -52,32 +79,82 @@ The Sling base above comes from the original Sling-viewer launcher; replace it f
 6. Rename a remote; verify the new `name-stream` reference. Restart Vision and confirm all assets and links remain. Open two browser tabs on one stream; closing one must leave the other playing.
 7. If applicable, test stale-IP recovery with a known receiver and check that the verified RxID/MAC matches before accepting its new address. The source transport's recovery logic is retained.
 
-## Linux / macOS
+## Linux deployment (Ubuntu / Debian)
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git python3 python3-venv python3-pip ffmpeg
+
 git clone --branch montjac --single-branch git@github.com:askjake/JAMboreeVision.git
 cd JAMboreeVision
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements-dev.txt -r requirements-ocr.txt
-# Install FFmpeg through your system's package manager first.
+ffmpeg -version
+ffprobe -version
 .venv/bin/python verify.py
-bash start.sh
+bash start.sh --host 0.0.0.0 --port 5004
 ```
 
-SGS pairing needs a usable OS keyring. A headless Linux session without Secret Service/keyring cannot persist new credentials; the app reports failure instead of silently saving plaintext. Serial access may require your OS's serial-device group/permissions.
+Open http://localhost:5004. Use `--host 127.0.0.1` for local-only access. Stop with Ctrl+C; run `bash start.sh` for subsequent starts. Use Python 3.10 or newer.
+
+SGS pairing needs an available OS keyring. A headless Linux session without Secret Service/keyring cannot persist new credentials; the app reports failure instead of silently saving plaintext. For DART serial access on Ubuntu/Debian, add your user to the serial group if needed and log out/in afterward:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+Serial devices are commonly `/dev/ttyACM0` or `/dev/ttyUSB0`; select your actual device in settop configuration.
+
+## macOS deployment
+
+With Homebrew installed:
+
+```bash
+brew install git python@3.12 ffmpeg
+
+git clone --branch montjac --single-branch git@github.com:askjake/JAMboreeVision.git
+cd JAMboreeVision
+"$(brew --prefix python@3.12)/bin/python3.12" -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements-dev.txt -r requirements-ocr.txt
+ffmpeg -version
+ffprobe -version
+.venv/bin/python verify.py
+bash start.sh --host 0.0.0.0 --port 5004
+```
+
+Open http://localhost:5004. Stop with Ctrl+C. Subsequent starts use `bash start.sh`. Serial devices generally appear under `/dev/cu.*`. macOS may request Keychain access when pairing.
+
+For any platform, if you use HTTPS Git authentication instead of SSH, substitute `https://github.com/askjake/JAMboreeVision.git` in the clone command. The repository must be accessible to your GitHub account.
 
 ## Update without leaving your branch
 
-Stop the app, then:
+Stop the app with Ctrl+C before updating. These commands retain `montjac` and use fast-forward-only pulls. If you have local edits or a divergent branch, Git will stop; resolve those changes before continuing. Data in `~/.jamboreevision` is outside the checkout and survives updates.
+
+Windows PowerShell, from your existing repository directory:
 
 ```powershell
+git switch montjac
 git branch --show-current
-# The branch should be montjac.
 git pull --ff-only origin montjac
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt -r requirements-ocr.txt
 .\.venv\Scripts\python.exe verify.py
 .\.venv\Scripts\python.exe -m vision
 ```
+
+Linux / macOS, from your existing repository directory:
+
+```bash
+git switch montjac
+git branch --show-current
+git pull --ff-only origin montjac
+.venv/bin/python -m pip install -r requirements-dev.txt -r requirements-ocr.txt
+.venv/bin/python verify.py
+bash start.sh --host 0.0.0.0 --port 5004
+```
+
+After updating, hard-refresh the browser (Ctrl+Shift+R on Windows/Linux, Cmd+Shift+R on macOS) to reload the UI assets.
 
 ## Persistence and playback
 

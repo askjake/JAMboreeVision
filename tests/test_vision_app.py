@@ -82,3 +82,41 @@ def test_legacy_bulk_save_cannot_break_remote_links(client):
     legacy.store.update_stb('H',{'passwd':'secret-value'})
     saved=client.post('/save-stb-list',json={'stbs':legacy.store.all()})
     assert saved.status_code==200 and 'secret-value' not in saved.text
+
+def test_gui_import_preview_apply_and_repeat(client):
+    import jamboree.app as legacy
+    seed(client)
+    config={'stbs':{'H':{'ip':'do-not-overwrite'},'New Hopper':{'ip':'192.0.2.2','protocol':'SGS','passwd':'omit-this'}},
+            'streams':[{'name':'Imported video','url':'rtmp://lab/live9','mode':'copy'}]}
+    preview=client.post('/api/vision/import',json={'config':config,'preview':True})
+    assert preview.status_code==200
+    assert preview.json['summary']=={'settops_added':1,'settops_skipped':1,'remotes_added':1,'streams_added':1,'streams_skipped':0,'credential_fields_omitted':1}
+    assert 'New Hopper' not in legacy.store.all()
+    applied=client.post('/api/vision/import',json={'config':config,'preview':False})
+    assert applied.status_code==200
+    assert legacy.store.get('H')['ip']=='127.0.0.1'
+    assert 'passwd' not in legacy.store.get('New Hopper')
+    state=client.get('/api/vision/state').json
+    assert len(state['remotes'])==2
+    assert next(r for r in state['remotes'] if r['name']=='New Hopper')['stream_id'] is None
+    assert next(r for r in state['remotes'] if r['name']=='My Remote')['stream_id'] is not None
+    again=client.post('/api/vision/import',json={'config':config,'preview':False})
+    assert again.json['summary']['settops_added']==0
+    assert again.json['summary']['remotes_added']==0
+    assert again.json['summary']['streams_added']==0
+
+
+def test_gui_import_validates_entire_file_before_writes(client):
+    import jamboree.app as legacy
+    seed(client)
+    bad={'stbs':{'New':{'ip':'192.0.2.2'}},'streams':[{'name':'Video','url':'http://lab/different'}]}
+    res=client.post('/api/vision/import',json={'config':bad,'preview':False})
+    assert res.status_code==400 and 'New' not in legacy.store.all()
+    for config in [[],{}, {'stbs':[]}, {'stbs':{'A':{},'a':{}}}, {'stbs':{'x':None}}, {'streams':[{'name':'x','url':'file:///x'}]}]:
+        assert client.post('/api/vision/import',json={'config':config}).status_code==400
+
+
+def test_gui_import_file_size_and_bare_alias_table(client):
+    assert client.post('/api/vision/import',json={'config':{'Bare':{'protocol':'RF','remote':1}},'preview':False}).status_code==200
+    oversized='x'*(2*1024*1024+1)
+    assert client.post('/api/vision/import',data=oversized,content_type='application/json').status_code==413
