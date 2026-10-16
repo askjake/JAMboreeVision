@@ -6,9 +6,9 @@ const os=require('node:os'),path=require('node:path');
 (async()=>{
  const fixture=spawn(process.env.JV_PYTHON||'python',['-m','tests.browser_fixture'],{cwd:process.cwd(),stdio:['ignore','pipe','pipe']});
  let stderr='';fixture.stderr.on('data',d=>stderr+=d);
- let browser;
+ let browser, config;
  try{
- const config=await new Promise((resolve,reject)=>{let text='';const timer=setTimeout(()=>reject(Error('Fixture timeout: '+stderr)),15000);fixture.stdout.on('data',d=>{text+=d;for(const line of text.split('\n'))if(line.startsWith('{')){try{resolve(JSON.parse(line));clearTimeout(timer);}catch{}}});fixture.on('exit',code=>{clearTimeout(timer);reject(Error('Fixture exited '+code+': '+stderr));});});
+ config=await new Promise((resolve,reject)=>{let text='';const timer=setTimeout(()=>reject(Error('Fixture timeout: '+stderr)),15000);fixture.stdout.on('data',d=>{text+=d;for(const line of text.split('\n'))if(line.startsWith('{')){try{resolve(JSON.parse(line));clearTimeout(timer);}catch{}}});fixture.on('exit',code=>{clearTimeout(timer);reject(Error('Fixture exited '+code+': '+stderr));});});
  browser=await chromium.launch({headless:true,executablePath:process.env.JV_CHROMIUM||undefined,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:1600,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(config.url);await page.waitForFunction(()=>document.querySelector('#system-status').textContent.includes('FFmpeg'));
@@ -38,5 +38,5 @@ const os=require('node:os'),path=require('node:path');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#remote-table').textContent.includes('Renamed Remote'));
  await page.setViewportSize({width:390,height:844});await page.locator('[data-tab="console"]').click();await page.screenshot({path:path.join(os.tmpdir(),'jv-mobile.png'),fullPage:true});
  assert.deepEqual(errors,[]);console.log('PASS: browser CRUD, stream links, actual HLS playback, remote dispatch, shared viewers, rename, reload, mobile layout.');
- }finally{if(browser)await browser.close();fixture.kill('SIGTERM');}
+ }finally{if(browser)await browser.close();if(config){try{await fetch(config.url+'/_test/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch{fixture.kill('SIGTERM');}}else fixture.kill('SIGTERM');}
 })().catch(e=>{console.error(e);process.exitCode=1;});

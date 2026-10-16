@@ -22,6 +22,10 @@ def fake_command(*args,**kwargs):
     commands.append({'args':args,'kwargs':kwargs})
     return {'ok':True,'via':'sgs_fixture'}
 legacy.ctl.handle_auto_remote=fake_command
+@app.post('/_test/shutdown')
+def shutdown_fixture():
+    threading.Thread(target=web.shutdown,daemon=True).start()
+    return {'ok':True}
 @app.get('/_test/commands')
 def captured():return {'commands':commands}
 source=root/'source';source.mkdir()

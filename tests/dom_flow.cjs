@@ -1,6 +1,6 @@
 const {JSDOM}=require('jsdom');const fs=require('fs');const {spawn}=require('child_process');const assert=require('assert/strict');
-(async()=>{const fixture=spawn(process.env.JV_PYTHON||'python',['-m','tests.browser_fixture'],{stdio:['ignore','pipe','pipe']});let dom;
-try{const cfg=await new Promise((resolve,reject)=>{let b='';fixture.stdout.on('data',d=>{b+=d;for(const l of b.split('\n'))if(l.startsWith('{')){try{resolve(JSON.parse(l))}catch{}}});fixture.on('exit',()=>reject(Error('fixture exited')))});
+(async()=>{const fixture=spawn(process.env.JV_PYTHON||'python',['-m','tests.browser_fixture'],{stdio:['ignore','pipe','pipe']});let dom,cfg;
+try{cfg=await new Promise((resolve,reject)=>{let b='';fixture.stdout.on('data',d=>{b+=d;for(const l of b.split('\n'))if(l.startsWith('{')){try{resolve(JSON.parse(l))}catch{}}});fixture.on('exit',()=>reject(Error('fixture exited')))});
 const html=fs.readFileSync('vision/static/index.html','utf8');dom=new JSDOM(html,{url:cfg.url,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window,d=w.document;
 w.fetch=(p,o)=>fetch(new URL(p,cfg.url),o);w.confirm=()=>true;w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.Hls={isSupported:()=>false};
 w.eval(fs.readFileSync('vision/static/app.js','utf8'));
@@ -16,4 +16,4 @@ d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#com
 d.querySelector('#watch-linked').click();await wait(()=>d.querySelectorAll('video').length===1);
 const j=await(await fetch(cfg.url+'/_test/commands')).json();assert.equal(j.commands[0].args[1],'DOM Hopper');assert.equal(j.commands[0].args[2],'guide');
 assert.equal(d.querySelector('.video-head strong').textContent,'DOM Remote-stream');assert.equal(d.querySelector('#toast').className,'');await wait(()=>d.querySelector('#video-count').textContent==='1 selected');console.log('PASS: DOM UI bootstrap, settop/stream/remote forms, persistent links, selected video window, command dispatch');
-}finally{dom?.window.close();fixture.kill('SIGTERM')}})().catch(e=>{console.error(e);process.exitCode=1});
+}finally{dom?.window.close();if(cfg){try{await fetch(cfg.url+'/_test/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch{fixture.kill('SIGTERM')}}else fixture.kill('SIGTERM')}})().catch(e=>{console.error(e);process.exitCode=1});
