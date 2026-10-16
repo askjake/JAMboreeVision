@@ -28,7 +28,7 @@ w.fetch=async(p,o)=>{
  if(String(p).endsWith('/command')){addedCommands.push(JSON.parse(o.body));return {ok:true,json:async()=>({ok:true,via:'dart'})};}
  return actualFetch(p,o);
 };
-for(const key of ['sat','tv','aux','input','reset','unpair']){
+for(const key of ['sat','tv','aux','input','mic','reset','unpair']){
  const b=d.querySelector('[data-key="'+key+'"]');assert.ok(b);assert.equal(b.disabled,false);
  b.click();await wait(()=>!b.disabled);assert.equal(addedCommands.at(-1).button,key);
 }

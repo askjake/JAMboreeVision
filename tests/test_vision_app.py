@@ -188,7 +188,7 @@ def test_offline_linked_stream_does_not_block_remote(client,app,monkeypatch):
     assert fn.call_count==3 and acquire.call_count==1
     assert client.get('/api/vision/state').json['remotes'][0]['stream_id']==s['id']
 
-@pytest.mark.parametrize('key', ['sat', 'tv', 'aux', 'input'])
+@pytest.mark.parametrize('key', ['sat', 'tv', 'aux', 'input', 'mic'])
 @pytest.mark.parametrize('transport', ['sgs', 'rf'])
 def test_added_mode_keys(client, monkeypatch, key, transport):
     import jamboree.app as legacy
@@ -301,3 +301,19 @@ def test_command_history_retention_and_restart(tmp_path):
     reopened.recover_history()
     assert reopened.history()[0]['status'] == 'interrupted'
     assert len(reopened.history()) == 100
+
+
+def test_mic_backend_rf_wire_mapping(client, monkeypatch):
+    import jamboree.serial_bridge as bridge
+    from jamboree.commands import get_sgs_codes
+    seed(client)
+    lines = []
+    monkeypatch.setattr(bridge, '_write', lambda alias, line: lines.append((alias, line)) or line.rstrip())
+    monkeypatch.setattr(bridge.time, 'sleep', lambda seconds: None)
+    response = client.post('/api/vision/settops/H/command',
+                           json={'button': 'mic', 'transport': 'rf', 'duration': 3000})
+    assert response.status_code == 200
+    assert response.json['via'] == 'rf'
+    assert lines == [('H', '1 97 17 3000\n')]
+    assert get_sgs_codes('mic', 120) == 'Mic'
+    assert get_sgs_codes('mic', 3000) == 'Mic'

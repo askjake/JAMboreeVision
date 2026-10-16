@@ -228,3 +228,15 @@ No debug flag is required. To also save the terminal output on Linux/macOS:
 
 When a port is reassigned, the old worker cancels its read and closes the device
 from its own thread, avoiding a close/read race during port switching.
+
+
+### Mic / voice key
+
+The remote console's **🎤 Mic** button uses the existing backend `mic` mapping:
+DART button 7 (press `97`, release `17`) or SGS `Mic`. The selected transport
+and press duration apply. To send the physical remote key for an RF pairing
+workflow, select **RF only**, select the required tap/hold duration (including
+**Hold · 3 s**), and click **Mic**. Confirm the pairing result on the receiver;
+this sends a key and does not itself verify pairing. No stream is required.
+Mic commands appear in command history; RF traffic also appears in terminal
+TX/RX logs. This button sends the remote key, not audio from the browser's mic.
