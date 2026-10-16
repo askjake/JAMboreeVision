@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 from flask import Flask, jsonify, request, send_from_directory, send_file
@@ -39,6 +40,7 @@ def create_app(data_dir=None):
     app.error_handler_spec = copy.deepcopy(legacy_app.error_handler_spec)
     app.after_request_funcs = copy.deepcopy(legacy_app.after_request_funcs)
     assets = Assets(root / 'assets.sqlite3')
+    assets.recover_history()
     media = Media(root / 'media')
     discovery = Discovery()
     asset_lock = threading.RLock()
@@ -129,6 +131,20 @@ def create_app(data_dir=None):
             init_serial_from_base(store.document())
             return jsonify(ok=True, preview=False, summary=summary)
 
+    @app.get('/api/vision/serial-ports')
+    def serial_ports():
+        from serial.tools import list_ports
+        try:
+            ports = sorted(list_ports.comports(), key=lambda p: p.device)
+            return jsonify(ok=True, ports=[{'device': p.device, 'description': p.description or ''}
+                                           for p in ports])
+        except OSError:
+            return jsonify(ok=False, error='Unable to enumerate host serial ports'), 503
+
+    @app.get('/api/vision/commands')
+    def command_history():
+        return jsonify(ok=True, commands=assets.history(request.args.get('alias')))
+
     @app.get('/api/vision/state')
     def state():
         remotes = assets.list('remotes')
@@ -160,7 +176,17 @@ def create_app(data_dir=None):
             if request.method == 'DELETE':
                 assets.delete('remotes', ident)
                 return jsonify(ok=True)
-            return jsonify(ok=True, remote=assets.save_remote(body(), store.all(), ident))
+            data = body()
+            if 'com_port' in data and (not isinstance(data['com_port'], str) or len(data['com_port']) > 256 or any(ord(c) < 32 for c in data['com_port'])):
+                raise ValueError('Invalid serial port')
+            if 'remote' in data and (not isinstance(data['remote'], str) or not data['remote'].isdigit() or not 1 <= int(data['remote']) <= 16):
+                raise ValueError('DART remote channel must be 1–16')
+            remote = assets.save_remote(data, store.all(), ident)
+            fields = {k: data[k] for k in ('com_port', 'remote') if k in data}
+            if fields:
+                store.update_stb(remote['stb_alias'], fields)
+                init_serial_from_base(store.document())
+            return jsonify(ok=True, remote=remote)
 
     @app.get('/api/vision/resolve/<path:alias>')
     def resolve(alias):
@@ -228,7 +254,14 @@ def create_app(data_dir=None):
         force = data.get('transport', 'auto')
         if force not in {'auto', 'sgs', 'rf'}:
             raise ValueError('Unknown transport')
+        history_id = assets.start_command(alias, button + (' + ' + combo + '+guide' if button == 'unpair' else ''),
+                                          'rf' if button in {'reset', 'unpair'} else force,
+                                          3000 if button == 'unpair' else 0 if button == 'reset' else delay)
+        started = time.monotonic()
+        def finish(status, via, message):
+            assets.finish_command(history_id, status, via, round((time.monotonic()-started)*1000), message)
         if not command_lock.acquire(blocking=False):
+            finish('rejected', None, 'Another remote command is still running; nothing sent')
             return jsonify(ok=False, error='A remote command is still running'), 409
         try:
             if button == 'unpair':
@@ -238,9 +271,18 @@ def create_app(data_dir=None):
             else:
                 result = ctl.handle_auto_remote('1', alias, button, delay,
                     force=None if force == 'auto' else force)
-            return jsonify(result)
-        except RuntimeError as exc:
-            return jsonify(ok=False, error=str(exc)), 503
+            via = str(result.get('via', 'unknown'))
+            ok = result.get('ok', True)
+            serial = result.get('delivery') == 'serial_flushed' or via in {'rf', 'dart', 'rf_fallback'}
+            message = ('Serial write completed; receiver action not confirmed' if serial else
+                       'SGS command completed; verify receiver action') if ok else 'Controller reported command failure'
+            finish('sent' if ok else 'failed', via, message)
+            return jsonify({**result, 'history_id': history_id, 'feedback': message})
+        except Exception as exc:
+            finish('failed', None, 'Command failed (' + type(exc).__name__ + '); check transport and server log')
+            if isinstance(exc, RuntimeError):
+                return jsonify(ok=False, error=str(exc)), 503
+            raise
         finally:
             command_lock.release()
 

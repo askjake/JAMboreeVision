@@ -814,3 +814,27 @@ for 3 seconds and released. Other console commands are blocked while the
 sequence runs. A configured, working DART serial connection is required for
 reset and unpair. Neither action requires video. Delivery status confirms serial
 writes; verify unpairing on the physical remote/receiver.
+
+
+### Host serial ports and command feedback
+
+Add/Edit settop and Add/Edit remote include a host USB/COM port dropdown, a
+**Rescan ports** button, and manual path entry. Detection runs on the server
+hosting JAMboreeVision (Linux, macOS, or Windows), not the browser computer.
+Configured disconnected ports remain selectable. Detection does not prove that
+a port is accessible or is DART hardware. Choose the correct port and DART
+channel; these are shared by all profiles referencing that settop. Saving a
+stream link alone leaves its serial settings unchanged.
+
+The remote console shows sending/result feedback and a **Remote command history**
+table, refreshed every three seconds. It defaults to the active settop; choose
+**All settops** for the shared history. Records include UTC timestamp (displayed
+in browser local time), command, requested transport/hold, actual transport when
+known, elapsed time, and running/sent/failed/rejected/interrupted status. The
+server retains the latest 1,000 entries in assets.sqlite3 and displays up to 100
+matching entries. Unfinished records become interrupted after restart, indicating
+an unknown device outcome. History covers the unified console command endpoints,
+not legacy API callers, pairing, or recovery operations. Invalid requests rejected
+before dispatch are not recorded. Serial delivery means the write completed;
+SGS completion also does not visually verify the receiver action. Failure history
+stores a generic diagnostic without raw transport responses or credentials.

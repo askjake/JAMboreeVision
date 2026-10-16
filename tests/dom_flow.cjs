@@ -2,18 +2,26 @@ const {JSDOM}=require('jsdom');const fs=require('fs');const {spawn}=require('chi
 (async()=>{const fixture=spawn(process.env.JV_PYTHON||'python',['-m','tests.browser_fixture'],{stdio:['ignore','pipe','pipe']});let dom,cfg;
 try{cfg=await new Promise((resolve,reject)=>{let b='';fixture.stdout.on('data',d=>{b+=d;for(const l of b.split('\n'))if(l.startsWith('{')){try{resolve(JSON.parse(l))}catch{}}});fixture.on('exit',()=>reject(Error('fixture exited')))});
 const html=fs.readFileSync('vision/static/index.html','utf8');dom=new JSDOM(html,{url:cfg.url,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window,d=w.document;
-w.fetch=(p,o)=>fetch(new URL(p,cfg.url),o);w.confirm=()=>true;w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.Hls={isSupported:()=>false};
+let fixturePorts=[{device:'/dev/jv-test-only',description:'Fixture USB'}];
+w.fetch=(p,o)=>String(p).endsWith('/serial-ports')?Promise.resolve({ok:true,json:async()=>({ok:true,ports:fixturePorts})}):fetch(new URL(p,cfg.url),o);w.confirm=()=>true;w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.Hls={isSupported:()=>false};
 w.eval(fs.readFileSync('vision/static/app.js','utf8'));
 async function wait(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,30))}throw Error('DOM wait timeout')}
 function fill(k,v){d.querySelector('#editor-fields [name="'+k+'"]').value=v}
 async function save(){const f=d.querySelector('#editor-form'),b=f.querySelector('[type=submit]');f.dispatchEvent(new w.SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:b}));await wait(()=>!d.querySelector('#editor').open);await new Promise(r=>setTimeout(r,80))}
 await wait(()=>d.querySelector('#system-status').textContent.includes('FFmpeg'));
-d.querySelector('#new-stb').click();fill('alias','DOM Hopper');fill('stb','R123');fill('ip','127.0.0.1');await save();
+d.querySelector('#new-stb').click();fill('alias','DOM Hopper');fill('stb','R123');fill('ip','127.0.0.1');
+await wait(()=>d.querySelector('[aria-label="Available host serial ports"]').options.length===2);
+const portSelect=d.querySelector('[aria-label="Available host serial ports"]');portSelect.value='/dev/jv-test-only';portSelect.dispatchEvent(new w.Event('change'));assert.equal(d.querySelector('[name=com_port]').value,'/dev/jv-test-only');
+fixturePorts=[];[...d.querySelectorAll('#editor-fields button')].find(b=>b.textContent==='Rescan ports').click();
+await wait(()=>portSelect.textContent.includes('not detected'));assert.equal(d.querySelector('[name=com_port]').value,'/dev/jv-test-only');
+fill('com_port','');await save();
 // A manually added settop is immediately controllable without a remote profile.
 assert.equal(d.querySelector('[data-key=guide]').disabled,false);
 assert.equal(d.querySelector('#watch-linked').disabled,true);
 const control=[...d.querySelectorAll('#stb-table button')].find(b=>b.textContent==='Control');assert.ok(control);control.click();
 d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));
+await wait(()=>d.querySelector('#command-history').textContent.includes('SGS command completed'));
+assert.ok(d.querySelector('#console #command-history'));
 // Every new control is wired without a stream; verify both chord choices.
 const actualFetch=w.fetch, addedCommands=[];
 w.fetch=async(p,o)=>{
@@ -31,6 +39,7 @@ w.fetch=actualFetch;
 console.log('PASS: SAT, TV, AUX, INPUT, reset and both unpair choices dispatch without video');
 // Create and operate a remote before any stream exists.
 d.querySelector('#new-remote').click();fill('name','DOM Remote');fill('stb_alias','DOM Hopper');
+assert.ok(d.querySelector('[aria-label="Available host serial ports"]'));assert.equal(d.querySelector('[name=remote]').value,'1');
 assert.equal(d.querySelector('[name=stream_id]').value,'');assert.match(d.querySelector('[name=stream_id]').textContent,/remote control only/);await save();
 assert.equal(d.querySelector('#watch-linked').disabled,true);assert.equal(d.querySelector('[data-key=guide]').disabled,false);
 d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));

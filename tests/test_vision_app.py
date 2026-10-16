@@ -241,3 +241,63 @@ def test_unpair_timing_and_releases(monkeypatch, combo):
     with pytest.raises(RuntimeError, match='port lost'):
         ctl.unpair('H', combo)
     assert events[-4:] == [('sat', 'up'), (combo, 'up'), ('guide', 'up'), ('allup', 'allup')]
+
+def test_host_serial_discovery(client, monkeypatch):
+    from serial.tools import list_ports
+    from types import SimpleNamespace
+    monkeypatch.setattr(list_ports, 'comports', lambda: [SimpleNamespace(device='COM4', description='USB DART'), SimpleNamespace(device='/dev/ttyUSB0', description=None)])
+    result = client.get('/api/vision/serial-ports')
+    assert result.json['ports'] == [{'device':'/dev/ttyUSB0','description':''},{'device':'COM4','description':'USB DART'}]
+    monkeypatch.setattr(list_ports, 'comports', lambda: [])
+    assert client.get('/api/vision/serial-ports').json['ports'] == []
+
+
+def test_remote_port_selection_preserves_other_fields(client):
+    import jamboree.app as legacy
+    _, r = seed(client)
+    legacy.store.update_stb('H', {'custom': 'retained'})
+    data = {**r, 'com_port': '/dev/disconnected-dart', 'remote': '4'}
+    assert client.put('/api/vision/remotes/'+r['id'], json=data).status_code == 200
+    assert legacy.store.get('H')['com_port'] == '/dev/disconnected-dart'
+    assert legacy.store.get('H')['remote'] == '4'
+    assert legacy.store.get('H')['custom'] == 'retained'
+    assert client.put('/api/vision/remotes/'+r['id'], json={**r, 'stream_id': None}).status_code == 200
+    assert legacy.store.get('H')['com_port'] == '/dev/disconnected-dart'
+    assert client.put('/api/vision/remotes/'+r['id'], json={**r, 'remote': '17'}).status_code == 400
+
+
+def test_command_history_results(client, monkeypatch):
+    import jamboree.app as legacy
+    seed(client)
+    fn = Mock(return_value={'ok':True,'via':'dart','delivery':'serial_flushed','stdout':'secret'})
+    monkeypatch.setattr(legacy.ctl, 'handle_auto_remote', fn)
+    route = '/api/vision/settops/H/command'
+    result = client.post(route, json={'button':'guide','transport':'rf'})
+    assert result.status_code == 200 and 'not confirmed' in result.json['feedback']
+    rows = client.get('/api/vision/commands?alias=H').json['commands']
+    row = rows[0]
+    assert row['status'] == 'sent' and row['via'] == 'dart' and row['elapsed_ms'] >= 0
+    assert 'secret' not in str(rows)
+    fn.side_effect = RuntimeError('private transport detail')
+    assert client.post(route, json={'button':'guide'}).status_code == 503
+    rows = client.get('/api/vision/commands?alias=H').json['commands']
+    assert rows[0]['status'] == 'failed' and 'private' not in str(rows)
+    fn.side_effect = None
+    assert client.post(route, json={'button':'guide'}).status_code == 200
+    assert client.get('/api/vision/commands?alias=NoSuchSettop').json['commands'] == []
+
+
+def test_command_history_retention_and_restart(tmp_path):
+    from vision.assets import Assets
+    path = tmp_path/'assets.sqlite3'
+    assets = Assets(path)
+    with assets.db() as c:
+        c.executemany("INSERT INTO command_history(alias,button,transport,duration,status,message) VALUES('H','guide','rf',120,'sent','done')", [()]*1000)
+    ident = assets.start_command('H', 'sat', 'rf', 3000)
+    with assets.db() as c:
+        assert c.execute('SELECT count(*) FROM command_history').fetchone()[0] == 1000
+    reopened = Assets(path)
+    assert reopened.history()[0]['id'] == ident
+    reopened.recover_history()
+    assert reopened.history()[0]['status'] == 'interrupted'
+    assert len(reopened.history()) == 100

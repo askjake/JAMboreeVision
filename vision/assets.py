@@ -47,6 +47,12 @@ class Assets:
                   stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
                   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS command_history (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                  alias TEXT NOT NULL, button TEXT NOT NULL, transport TEXT NOT NULL,
+                  duration INTEGER NOT NULL, status TEXT NOT NULL, via TEXT,
+                  elapsed_ms INTEGER, message TEXT NOT NULL);
                 PRAGMA user_version=1;
             ''')
 
@@ -60,6 +66,30 @@ class Assets:
                 yield c
         finally:
             c.close()
+
+    def recover_history(self):
+        with self.db() as c:
+            c.execute("UPDATE command_history SET status='interrupted', message='Server stopped before result was recorded; device outcome unknown' WHERE status='running'")
+
+    def start_command(self, alias, button, transport, duration):
+        with self.db() as c:
+            ident = c.execute("INSERT INTO command_history(alias,button,transport,duration,status,message) VALUES(?,?,?,?,'running','Sending command')",
+                              (alias, button, transport, duration)).lastrowid
+            c.execute('DELETE FROM command_history WHERE id NOT IN (SELECT id FROM command_history ORDER BY id DESC LIMIT 1000)')
+            return ident
+
+    def finish_command(self, ident, status, via, elapsed_ms, message):
+        with self.db() as c:
+            c.execute('UPDATE command_history SET status=?,via=?,elapsed_ms=?,message=? WHERE id=?',
+                      (status, via, elapsed_ms, message, ident))
+
+    def history(self, alias=None):
+        with self.db() as c:
+            if alias is not None:
+                rows = c.execute('SELECT * FROM command_history WHERE alias=? ORDER BY id DESC LIMIT 100', (alias,))
+            else:
+                rows = c.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT 100')
+            return [dict(r) for r in rows]
 
     def list(self, table):
         if table not in {'streams', 'remotes'}:
