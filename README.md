@@ -8,11 +8,13 @@ A single local web application for settop control, linked video, and network str
 - **Settops & remotes:** receiver/IP/MAC configuration, Hopper/Joey topology, SGS PIN pairing, serial ports/channels, transport status, and IP recovery.
 - **Streams & discovery:** saved source URLs, edit/delete/probe actions, configurable host/CIDR discovery with video-track verification, and playback mode selection.
 
+**Streams are optional.** Create and use SGS/DART remotes without adding or selecting any video source. Choose **No stream — remote control only** in the optional stream dropdown. FFmpeg is needed for video features, not remote control.
+
 A remote named `Bench Hopper` linked to a video source exposes the reference `Bench Hopper-stream`. The reference resolves through `GET /api/vision/resolve/Bench%20Hopper-stream`. Stream and remote UUIDs preserve links across renames, source URL changes, and restarts. Multiple remotes may share one source; the app uses one FFmpeg worker per selected source.
 
 ## Windows laptop: deploy from PowerShell
 
-Prerequisites: Git, **Python 3.10+** (3.11/3.12 recommended), and FFmpeg with both `ffmpeg` and `ffprobe` on PATH. Install FFmpeg using your approved package manager or a build linked from https://ffmpeg.org/download.html. Reopen the terminal after changing PATH. No Node.js or Streamlit is needed to run the app.
+Prerequisites: Git, **Python 3.10+** (3.11/3.12 recommended), and, for optional video features, FFmpeg with both `ffmpeg` and `ffprobe` on PATH. Install FFmpeg using your approved package manager or a build linked from https://ffmpeg.org/download.html. Reopen the terminal after changing PATH. No Node.js or Streamlit is needed to run the app.
 
 ```powershell
 git clone --branch montjac --single-branch git@github.com:askjake/JAMboreeVision.git

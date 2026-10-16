@@ -10,7 +10,7 @@
 
 Use this procedure to install JAMboreeVision from scratch, configure settop control and network video, operate every current GUI feature, update an existing installation, and recover from a failed change.
 
-Installation is complete when the service starts, the browser shows the three tabs and **Import config…**, FFmpeg is available, and the automated checks pass. Operational acceptance additionally requires a real button press reaching the intended settop and its linked video showing the resulting action. Passing software tests alone does not establish receiver, serial, pairing, or lab-network acceptance.
+Installation is complete when the service starts, the browser shows the three tabs and **Import config…**, the automated checks pass, and FFmpeg is available if video features are required. Operational acceptance additionally requires a real button press reaching the intended settop and its linked video showing the resulting action. Passing software tests alone does not establish receiver, serial, pairing, or lab-network acceptance.
 
 ### Navigation
 
@@ -54,7 +54,7 @@ The three tabs are **Remote console**, **Settops & remotes**, and **Streams & di
 
 Record the server name, server IP, intended port, OS, repository directory, deployment branch, and data directory. For each receiver, collect its alias, receiver ID, current IP, model, topology, and preferred transport. For RF, identify the serial port and DART channel. For video, collect a known source host and stream path or URL template.
 
-Required runtime: Git, Python **3.10 or newer** (3.11/3.12 recommended), FFmpeg including ffprobe, and a modern browser supporting HLS.js or native HLS. SGS credential persistence requires a usable OS keyring; Windows also has the retained DPAPI fallback.
+Required for remote control: Git, Python **3.10 or newer** (3.11/3.12 recommended), and a modern browser. Video discovery/playback additionally needs FFmpeg including ffprobe on the server and HLS.js or native HLS support in the browser. The full-install commands below include these optional video tools; a remote-only installation may omit the FFmpeg system package. SGS credential persistence requires a usable OS keyring; Windows also has the retained DPAPI fallback.
 
 The commands below install the test and optional OCR Python dependencies so the full test suite can run. Node.js is only needed for optional DOM/browser tests. Tesseract is only needed for advanced OCR-based pairing, not manual PIN entry.
 
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:5004/api/vision/state
 
 Health must respond successfully. The state response reports `ffmpeg`, `ffprobe`, registry counts, and playback/discovery state. Treat state dumps as lab inventory; keep them within the intended audience.
 
-In the browser, confirm all three tabs, **Import config…**, and **FFmpeg ready**. A new installation has zero assets until you import or create them. Health alone does not prove SGS/RF delivery or source reachability.
+In the browser, confirm all three tabs, **Import config…**, and **FFmpeg ready** if using video. An FFmpeg-unavailable message does not disable remote control. A new installation has zero assets until you import or create them. Health alone does not prove SGS/RF delivery or source reachability.
 
 ## 8. Import existing configuration
 
@@ -424,6 +424,8 @@ Changing a saved source stops the old worker. Existing clients can reconnect on 
 ## 11. Link remotes and watch video
 
 ### Create or edit a remote
+
+**A stream is optional.** For control without video, choose **No stream — remote control only** under **Linked stream (optional)**. You can create remotes and send SGS/DART commands with zero saved streams and without FFmpeg installed. Only **Watch linked stream** stays disabled for an unlinked remote. Add a stream later, or clear a link using the same dropdown, without changing remote identity or disabling its controls.
 
 Open **Settops & remotes → + Remote**. Enter a display name, choose an existing settop, and optionally choose a stream. Select **Save**. **Edit** can rename the remote, change its target settop, or change its stream association. **Delete** removes the remote, not the physical settop or video source.
 

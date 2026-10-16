@@ -9,8 +9,13 @@ function fill(k,v){d.querySelector('#editor-fields [name="'+k+'"]').value=v}
 async function save(){const f=d.querySelector('#editor-form'),b=f.querySelector('[type=submit]');f.dispatchEvent(new w.SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:b}));await wait(()=>!d.querySelector('#editor').open);await new Promise(r=>setTimeout(r,80))}
 await wait(()=>d.querySelector('#system-status').textContent.includes('FFmpeg'));
 d.querySelector('#new-stb').click();fill('alias','DOM Hopper');fill('stb','R123');fill('ip','127.0.0.1');await save();
+// Create and operate a remote before any stream exists.
+d.querySelector('#new-remote').click();fill('name','DOM Remote');fill('stb_alias','DOM Hopper');
+assert.equal(d.querySelector('[name=stream_id]').value,'');assert.match(d.querySelector('[name=stream_id]').textContent,/remote control only/);await save();
+assert.equal(d.querySelector('#watch-linked').disabled,true);assert.equal(d.querySelector('[data-key=guide]').disabled,false);
+d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));
 d.querySelector('#new-stream').click();fill('name','DOM video');fill('url',cfg.stream);await save();
-d.querySelector('#new-remote').click();fill('name','DOM Remote');fill('stb_alias','DOM Hopper');const sel=d.querySelector('[name=stream_id]');sel.selectedIndex=1;await save();
+const link=d.querySelector('#console-link');link.selectedIndex=1;link.dispatchEvent(new w.Event('change'));await wait(()=>!d.querySelector('#watch-linked').disabled);
 await wait(()=>d.querySelector('#remote-table').textContent.includes('DOM Remote-stream'));
 d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));
 d.querySelector('#watch-linked').click();await wait(()=>d.querySelectorAll('video').length===1);

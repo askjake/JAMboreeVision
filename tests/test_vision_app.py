@@ -128,3 +128,33 @@ def test_updated_ui_is_not_cached(client):
         assert response.status_code==200
         assert 'no-store' in response.headers['Cache-Control']
     assert 'id="import-config"' in client.get('/').text
+
+
+def test_remote_control_without_streams_or_ffmpeg(client,app,monkeypatch):
+    import jamboree.app as legacy
+    monkeypatch.setattr('vision.app.shutil.which',lambda _:None)
+    fn=Mock(return_value={'ok':True,'via':'sgs'})
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
+    assert client.post('/api/vision/settops',json={'alias':'Control only','protocol':'SGS','role':'hopper','stb':'R123','ip':'192.0.2.1'}).status_code==200
+    for label,fields in [('Omitted',{}),('Blank',{'stream_id':''}),('Null',{'stream_id':None})]:
+        res=client.post('/api/vision/remotes',json={'name':label,'stb_alias':'Control only',**fields})
+        assert res.status_code==200
+        r=res.json['remote'];assert r['stream_id'] is None
+        assert client.post('/api/vision/remotes/'+r['id']+'/command',json={'button':'guide'}).status_code==200
+    inventory=client.get('/api/vision/state').json
+    assert inventory['streams']==[] and inventory['ffmpeg'] is False
+    assert all(r['stream_alias'] is None for r in inventory['remotes'])
+    assert fn.call_count==3
+    assert app.extensions['vision']['media'].status()=={}
+
+
+def test_clearing_stream_preserves_remote_and_control(client,monkeypatch):
+    import jamboree.app as legacy
+    s,r=seed(client)
+    res=client.put('/api/vision/remotes/'+r['id'],json={**r,'stream_id':''})
+    assert res.status_code==200 and res.json['remote']['id']==r['id']
+    assert res.json['remote']['stream_id'] is None
+    fn=Mock(return_value={'ok':True,'via':'sgs'})
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
+    assert client.post('/api/vision/remotes/'+r['id']+'/command',json={'button':'guide'}).status_code==200
+    assert client.get('/api/vision/state').json['streams'][0]['id']==s['id']
