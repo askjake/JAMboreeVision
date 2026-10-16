@@ -2,6 +2,8 @@
 
 A single local web application for settop control, linked video, and network stream discovery.
 
+**Complete setup and operator procedure:** [Method of Procedure (MOP)](docs/MOP.md) — fresh Windows/Linux/macOS deployment, updates, backups/rollback, importing, every GUI feature, and troubleshooting.
+
 - **Remote console:** searchable remotes, working SGS/DART buttons, a persistent per-remote stream dropdown, independent stream checkboxes, and multiple in-page players.
 - **Settops & remotes:** receiver/IP/MAC configuration, Hopper/Joey topology, SGS PIN pairing, serial ports/channels, transport status, and IP recovery.
 - **Streams & discovery:** saved source URLs, edit/delete/probe actions, configurable host/CIDR discovery with video-track verification, and playback mode selection.
