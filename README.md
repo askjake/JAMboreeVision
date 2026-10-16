@@ -210,3 +210,21 @@ not legacy API callers, pairing, or recovery operations. Invalid requests reject
 before dispatch are not recorded. Serial delivery means the write completed;
 SGS completion also does not visually verify the receiver action. Failure history
 stores a generic diagnostic without raw transport responses or credentials.
+
+
+### Terminal serial traffic
+
+Normal startup now logs DART serial traffic at INFO level, with timestamp and
+port: `TX -> b'1 83 03 120\n'`, `TX flushed (12 bytes)`, and
+`RX <- b'board response\r\n'` (illustrative values). TX records attempted bytes;
+TX flushed records a completed serial write, not receiver confirmation. RX is
+printed whenever the board sends data, even without a GUI command. Byte escapes
+preserve line endings and prevent board control characters changing the terminal.
+No debug flag is required. To also save the terminal output on Linux/macOS:
+
+```bash
+.venv/bin/python -m vision --host 0.0.0.0 --port 5004 2>&1 | tee -a jamboreevision-console.log
+```
+
+When a port is reassigned, the old worker cancels its read and closes the device
+from its own thread, avoiding a close/read race during port switching.

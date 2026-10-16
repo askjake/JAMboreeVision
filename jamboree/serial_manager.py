@@ -76,9 +76,11 @@ class SerialPortWorker(threading.Thread):
     def stop(self) -> None:
         self._stop_event.set()
         self._ready.clear()
+        # Only the worker closes the device. Closing from this caller races
+        # pyserial's active read and can turn its file descriptor into None.
         with contextlib.suppress(Exception):
-            if self._ser and self._ser.is_open:
-                self._ser.close()
+            if self._ser:
+                self._ser.cancel_read()
         self._fail_pending("serial worker stopped")
 
     def submit(
@@ -90,6 +92,9 @@ class SerialPortWorker(threading.Thread):
         require_ready: bool = True,
         wait: bool = True,
     ) -> bool:
+        if self._stop_event.is_set():
+            LOG.warning("[%-6s] rejected write: worker stopping", self.com)
+            return False
         if require_ready and not self.is_ready:
             LOG.warning("[%-6s] rejected write: port not ready", self.com)
             return False
@@ -131,7 +136,9 @@ class SerialPortWorker(threading.Thread):
             if _EXCLUSIVE_OK:
                 kwargs["exclusive"] = True
             self._ser = serial.Serial(**kwargs)
-            time.sleep(2.0)  # Arduino bootloader settle
+            if self._stop_event.wait(2.0):  # Arduino bootloader settle
+                self._close_serial()
+                return False
             with contextlib.suppress(Exception):
                 self._ser.reset_input_buffer()
                 self._ser.reset_output_buffer()
@@ -187,6 +194,9 @@ class SerialPortWorker(threading.Thread):
     def _drain_writes(self) -> bool:
         """Write queued requests; return False if the port failed."""
         while True:
+            if self._stop_event.is_set():
+                self._fail_pending("serial worker stopped")
+                return False
             try:
                 request = self._write_q.get_nowait()
             except queue.Empty:
@@ -194,8 +204,10 @@ class SerialPortWorker(threading.Thread):
             try:
                 if not self._ser or not self._ser.is_open:
                     raise SerialException("serial port closed before write")
+                LOG.info("[%s] TX -> %r", self.com, request.data)
                 self._ser.write(request.data)
                 self._ser.flush()
+                LOG.info("[%s] TX flushed (%d bytes)", self.com, len(request.data))
                 self._last_activity = time.monotonic()
                 request.ok = True
             except Exception as exc:
@@ -223,21 +235,28 @@ class SerialPortWorker(threading.Thread):
                         continue
                     backoff_idx = 0
 
+                if self._stop_event.is_set():
+                    break
                 if not self._drain_writes():
                     continue
 
                 try:
                     line = self._ser.readline()
                     if line:
+                        LOG.info("[%s] RX <- %r", self.com, line)
                         self._last_activity = time.monotonic()
                         if self._on_rx:
                             self._on_rx(line, self.com)
-                except SerialException as exc:
+                except (SerialException, OSError, TypeError) as exc:
+                    if self._stop_event.is_set():
+                        break
                     self.last_error = str(exc)
                     LOG.warning("[%-6s] read failed: %s", self.com, exc)
                     self._close_serial()
                     continue
 
+                if self._stop_event.is_set():
+                    break
                 if time.monotonic() - self._last_activity > STALL_RESET_S:
                     self._soft_reset()
         finally:

@@ -73,3 +73,67 @@ def test_submit_reports_write_failure():
     assert result["ok"] is False
     assert worker.last_error == "wire failed"
 
+
+
+def test_serial_traffic_is_logged_at_info(caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger='serial-manager')
+    worker = serial_manager.SerialPortWorker('COM1')
+    device = FakeSerial()
+    worker._ser = device
+    worker._ready.set()
+    assert worker.submit(b'1 4 down\n', wait=False)
+    assert worker._drain_writes()
+    assert "TX -> b'1 4 down\\n'" in caplog.text
+    assert 'TX flushed (9 bytes)' in caplog.text
+    def read():
+        worker._stop_event.set()
+        return b'board OK\r\n'
+    device.readline = read
+    worker.run()
+    assert "RX <- b'board OK\\r\\n'" in caplog.text
+
+
+def test_stop_during_read_closes_only_on_worker_thread():
+    worker = serial_manager.SerialPortWorker('COM1')
+    reading, cancelled = threading.Event(), threading.Event()
+    class BlockingSerial(FakeSerial):
+        def readline(self):
+            reading.set()
+            assert cancelled.wait(1)
+            assert self.is_open  # stop must not close under the reader
+            return b''
+        def cancel_read(self):
+            cancelled.set()
+        def close(self):
+            assert threading.current_thread() is worker
+            super().close()
+    device = BlockingSerial()
+    worker._ser = device
+    worker._ready.set()
+    worker.start()
+    assert reading.wait(1)
+    worker.stop()
+    worker.join(1)
+    assert not worker.is_alive() and not device.is_open
+    assert not worker.submit(b'late', require_ready=False, wait=False)
+
+
+def test_read_failure_reopens_port(monkeypatch, caplog):
+    worker = serial_manager.SerialPortWorker('COM1')
+    broken, replacement = FakeSerial(), FakeSerial()
+    def bad_read():
+        raise TypeError("'NoneType' object cannot be interpreted as an integer")
+    broken.readline = bad_read
+    def good_read():
+        worker._stop_event.set()
+        return b'back online\n'
+    replacement.readline = good_read
+    worker._ser = broken
+    def reopen():
+        worker._ser = replacement
+        return True
+    monkeypatch.setattr(worker, '_open_serial', reopen)
+    worker.run()
+    assert not broken.is_open and not replacement.is_open
+    assert 'read failed' in caplog.text
