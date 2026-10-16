@@ -1,0 +1,25 @@
+{
+  "stbs": {
+    "Hopper-A": {
+      "alias": "Hopper-A",
+      "stb": "R0000000000-00",
+      "ip": "192.0.2.10",
+      "protocol": "SGS",
+      "remote": "1",
+      "com_port": "COM1",
+      "role": "hopper",
+      "host": "Hopper-A"
+    },
+    "Joey-A": {
+      "alias": "Joey-A",
+      "stb": "R0000000001-00",
+      "ip": "192.0.2.11",
+      "protocol": "SGS",
+      "remote": "2",
+      "com_port": "COM1",
+      "role": "joey",
+      "host": "Hopper-A"
+    }
+  }
+}
+
