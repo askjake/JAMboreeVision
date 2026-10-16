@@ -158,3 +158,32 @@ def test_clearing_stream_preserves_remote_and_control(client,monkeypatch):
     monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
     assert client.post('/api/vision/remotes/'+r['id']+'/command',json={'button':'guide'}).status_code==200
     assert client.get('/api/vision/state').json['streams'][0]['id']==s['id']
+
+
+def test_settop_control_needs_no_remote_profile_or_video(client,app,monkeypatch):
+    import jamboree.app as legacy
+    assert client.post('/api/vision/settops',json={'alias':'RF bench','protocol':'RF','role':'hopper','remote':'1'}).status_code==200
+    assert client.get('/api/vision/state').json['remotes']==[]
+    fn=Mock(return_value={'ok':True,'via':'rf'})
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
+    acquire=Mock(side_effect=AssertionError('Control must not access video'))
+    monkeypatch.setattr(app.extensions['vision']['media'],'acquire',acquire)
+    res=client.post('/api/vision/settops/RF%20bench/command',json={'button':'guide','transport':'rf'})
+    assert res.status_code==200
+    fn.assert_called_once_with('1','RF bench','guide',120,force='rf')
+    acquire.assert_not_called()
+    assert client.post('/api/vision/settops/missing/command',json={'button':'guide'}).status_code==404
+
+
+def test_offline_linked_stream_does_not_block_remote(client,app,monkeypatch):
+    import jamboree.app as legacy
+    s,r=seed(client)
+    acquire=Mock(side_effect=ValueError('Stream offline'))
+    monkeypatch.setattr(app.extensions['vision']['media'],'acquire',acquire)
+    assert client.post('/api/vision/streams/'+s['id']+'/play',json={'viewer':'test-viewer'}).status_code==400
+    fn=Mock(return_value={'ok':True,'via':'sgs'})
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
+    for key in ['guide','up','select']:
+        assert client.post('/api/vision/remotes/'+r['id']+'/command',json={'button':key}).status_code==200
+    assert fn.call_count==3 and acquire.call_count==1
+    assert client.get('/api/vision/state').json['remotes'][0]['stream_id']==s['id']

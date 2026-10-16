@@ -8,7 +8,7 @@ A single local web application for settop control, linked video, and network str
 - **Settops & remotes:** receiver/IP/MAC configuration, Hopper/Joey topology, SGS PIN pairing, serial ports/channels, transport status, and IP recovery.
 - **Streams & discovery:** saved source URLs, edit/delete/probe actions, configurable host/CIDR discovery with video-track verification, and playback mode selection.
 
-**Streams are optional.** Create and use SGS/DART remotes without adding or selecting any video source. Choose **No stream — remote control only** in the optional stream dropdown. FFmpeg is needed for video features, not remote control.
+**Streams are optional.** Every configured settop is immediately available in the remote console; use **Control** in its table row. No separate remote profile or video is needed to send commands. A linked stream may remain offline without disabling buttons. Create and use SGS/DART remotes without adding or selecting any video source. Choose **No stream — remote control only** in the optional stream dropdown. FFmpeg is needed for video features, not remote control.
 
 A remote named `Bench Hopper` linked to a video source exposes the reference `Bench Hopper-stream`. The reference resolves through `GET /api/vision/resolve/Bench%20Hopper-stream`. Stream and remote UUIDs preserve links across renames, source URL changes, and restarts. Multiple remotes may share one source; the app uses one FFmpeg worker per selected source.
 

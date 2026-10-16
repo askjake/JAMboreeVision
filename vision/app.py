@@ -203,7 +203,18 @@ def create_app(data_dir=None):
 
     @app.post('/api/vision/remotes/<ident>/command')
     def command(ident):
-        r = require('remotes', ident)
+        return dispatch_command(require('remotes', ident)['stb_alias'])
+
+    @app.post('/api/vision/settops/<path:alias>/command')
+    def settop_command(alias):
+        canonical = store.resolve_alias(alias)
+        if not canonical:
+            raise KeyError('Settop not found')
+        return dispatch_command(canonical)
+
+    def dispatch_command(alias):
+        # Device control depends only on the configured settop transport.
+        # Never probe, acquire, or check video here.
         data = body()
         button = str(data.get('button', '')).lower()
         if button not in button_id_to_number:
@@ -217,7 +228,7 @@ def create_app(data_dir=None):
         if not command_lock.acquire(blocking=False):
             return jsonify(ok=False, error='A remote command is still running'), 409
         try:
-            result = ctl.handle_auto_remote('1', r['stb_alias'], button, delay,
+            result = ctl.handle_auto_remote('1', alias, button, delay,
                 force=None if force == 'auto' else force)
             return jsonify(result)
         except RuntimeError as exc:

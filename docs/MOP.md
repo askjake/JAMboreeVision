@@ -435,6 +435,8 @@ A remote `Bench Remote` linked to a source exposes the reference **`Bench Remote
 
 ### Remote console
 
+Every configured settop appears as a control target even without a saved remote profile. Use **Control** on its row under **Settops & remotes** to select it and open the console. The saved SGS/RF transport is sufficient; stream availability is never a control prerequisite. Named remote profiles remain available for custom names and optional stream associations. Choosing a stream for a direct settop target creates a saved profile only when needed. A hung/offline linked video affects its player window, not the receiver buttons; you may retain the association for later.
+
 1. Find a remote in the searchable list and select it.
 2. Verify the active remote name and settop alias.
 3. Select a linked stream if needed; select **Watch linked stream** to open it.
