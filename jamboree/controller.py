@@ -370,20 +370,30 @@ class Controller:
             "ts": _ts(),
         }
 
-    def unpair(self, stb_name: str) -> Dict[str, Any]:
+    def unpair(self, stb_name: str, combo: str = "dvr") -> Dict[str, Any]:
+        if combo not in {"dvr", "home"}:
+            raise ValueError("Unpair combination must be dvr or home")
         stb_name = self._canonical_alias(stb_name)
         try:
             self.dart(stb_name, "sat", "down")
-            time.sleep(3.10)
+            time.sleep(3.0)
             self.dart(stb_name, "sat", "up")
             time.sleep(0.20)
-            self.dart(stb_name, "dvr", "down")
+            self.dart(stb_name, combo, "down")
             self.dart(stb_name, "guide", "down")
-            time.sleep(3.50)
+            time.sleep(3.0)
         finally:
-            try:
-                self.dart(stb_name, "allup", "allup")
-            except Exception:
-                LOG.exception("failed to release all buttons after unpair sequence")
-        return {"ok": True, "unpaired": stb_name, "ts": _ts()}
-
+            # Attempt every release even if a press or earlier release fails.
+            # Surface cleanup failures: serial delivery is not receiver confirmation.
+            release_error = None
+            for button, action in (("sat", "up"), (combo, "up"),
+                                   ("guide", "up"), ("allup", "allup")):
+                try:
+                    self.dart(stb_name, button, action)
+                except Exception as exc:
+                    release_error = exc
+                    LOG.exception("failed to release %s after unpair sequence", button)
+            if release_error is not None:
+                raise RuntimeError("RF unpair release failed; check DART connection") from release_error
+        return {"ok": True, "via": "dart", "unpaired": stb_name,
+                "combo": combo, "delivery": "serial_flushed", "ts": _ts()}

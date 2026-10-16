@@ -217,8 +217,11 @@ def create_app(data_dir=None):
         # Never probe, acquire, or check video here.
         data = body()
         button = str(data.get('button', '')).lower()
-        if button not in button_id_to_number:
+        if button not in button_id_to_number and button != 'unpair':
             raise ValueError('Unknown remote button')
+        combo = data.get('combo', 'dvr')
+        if button == 'unpair' and combo not in {'dvr', 'home'}:
+            raise ValueError('Unpair combination must be dvr or home')
         delay = int(data.get('duration', 120))
         if not 0 <= delay <= 5000:
             raise ValueError('Button duration must be between 0 and 5000 milliseconds')
@@ -228,8 +231,13 @@ def create_app(data_dir=None):
         if not command_lock.acquire(blocking=False):
             return jsonify(ok=False, error='A remote command is still running'), 409
         try:
-            result = ctl.handle_auto_remote('1', alias, button, delay,
-                force=None if force == 'auto' else force)
+            if button == 'unpair':
+                result = ctl.unpair(alias, combo=combo)
+            elif button == 'reset':
+                result = ctl.dart(alias, 'reset', 'reset')
+            else:
+                result = ctl.handle_auto_remote('1', alias, button, delay,
+                    force=None if force == 'auto' else force)
             return jsonify(result)
         except RuntimeError as exc:
             return jsonify(ok=False, error=str(exc)), 503

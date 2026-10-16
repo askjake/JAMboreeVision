@@ -14,6 +14,21 @@ assert.equal(d.querySelector('[data-key=guide]').disabled,false);
 assert.equal(d.querySelector('#watch-linked').disabled,true);
 const control=[...d.querySelectorAll('#stb-table button')].find(b=>b.textContent==='Control');assert.ok(control);control.click();
 d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));
+// Every new control is wired without a stream; verify both chord choices.
+const actualFetch=w.fetch, addedCommands=[];
+w.fetch=async(p,o)=>{
+ if(String(p).endsWith('/command')){addedCommands.push(JSON.parse(o.body));return {ok:true,json:async()=>({ok:true,via:'dart'})};}
+ return actualFetch(p,o);
+};
+for(const key of ['sat','tv','aux','input','reset','unpair']){
+ const b=d.querySelector('[data-key="'+key+'"]');assert.ok(b);assert.equal(b.disabled,false);
+ b.click();await wait(()=>!b.disabled);assert.equal(addedCommands.at(-1).button,key);
+}
+assert.equal(addedCommands.at(-1).combo,'dvr');
+d.querySelector('#unpair-combo').value='home';d.querySelector('[data-key=unpair]').click();
+await wait(()=>!d.querySelector('[data-key=unpair]').disabled);assert.equal(addedCommands.at(-1).combo,'home');
+w.fetch=actualFetch;
+console.log('PASS: SAT, TV, AUX, INPUT, reset and both unpair choices dispatch without video');
 // Create and operate a remote before any stream exists.
 d.querySelector('#new-remote').click();fill('name','DOM Remote');fill('stb_alias','DOM Hopper');
 assert.equal(d.querySelector('[name=stream_id]').value,'');assert.match(d.querySelector('[name=stream_id]').textContent,/remote control only/);await save();

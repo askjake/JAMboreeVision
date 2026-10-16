@@ -171,3 +171,18 @@ One worker serves all viewers of a stream. Each browser renews its lease every 2
 The bundled HLS.js asset supports offline UI loading. Discovery checks at most 256 candidate URLs with eight probes at once and per-probe timeouts. A successful probe proves a video track was readable then, not permanent availability or a particular settop identity; link sources deliberately.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PROVENANCE.md](docs/PROVENANCE.md), and [docs/VALIDATION.md](docs/VALIDATION.md).
+
+
+### Additional remote controls
+
+The remote console includes **SAT**, **TV**, **AUX**, and **INPUT**, using the
+selected transport and press duration and the existing JAMboree button mappings.
+**Reset remotes (DART)** sends the existing DART reset command for the selected
+settop's configured remote channel. It does not delete remote profiles or links.
+**Unpair (RF) remote** always uses DART/RF, regardless of the transport dropdown:
+choose **DVR + GUIDE** or **HOME + GUIDE**, then click Unpair. SAT is held for
+3 seconds and released; after a 200 ms gap, both chosen keys are held together
+for 3 seconds and released. Other console commands are blocked while the
+sequence runs. A configured, working DART serial connection is required for
+reset and unpair. Neither action requires video. Delivery status confirms serial
+writes; verify unpairing on the physical remote/receiver.

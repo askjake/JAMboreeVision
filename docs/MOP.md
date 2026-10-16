@@ -799,3 +799,18 @@ The fixture uses loopback test-pattern video and a test-only controller replacem
 Do not edit or restore a live SQLite file by overwriting it. Take backups with the service stopped, copy the full data directory, and record custom paths. Repository updates normally preserve user data because it lives outside the checkout. Newer releases can change schemas; restore a matching pre-change snapshot if a later code rollback requires the older schema.
 
 This release has no GUI full-registry export/restore, user accounts, service installer, automatic arbitrary-path stream enumeration, or automatic proof that a stream depicts a receiver. The MOP describes current implemented behavior, including these operational boundaries.
+
+
+### Additional remote controls
+
+The remote console includes **SAT**, **TV**, **AUX**, and **INPUT**, using the
+selected transport and press duration and the existing JAMboree button mappings.
+**Reset remotes (DART)** sends the existing DART reset command for the selected
+settop's configured remote channel. It does not delete remote profiles or links.
+**Unpair (RF) remote** always uses DART/RF, regardless of the transport dropdown:
+choose **DVR + GUIDE** or **HOME + GUIDE**, then click Unpair. SAT is held for
+3 seconds and released; after a 200 ms gap, both chosen keys are held together
+for 3 seconds and released. Other console commands are blocked while the
+sequence runs. A configured, working DART serial connection is required for
+reset and unpair. Neither action requires video. Delivery status confirms serial
+writes; verify unpairing on the physical remote/receiver.

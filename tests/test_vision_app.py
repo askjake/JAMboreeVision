@@ -187,3 +187,57 @@ def test_offline_linked_stream_does_not_block_remote(client,app,monkeypatch):
         assert client.post('/api/vision/remotes/'+r['id']+'/command',json={'button':key}).status_code==200
     assert fn.call_count==3 and acquire.call_count==1
     assert client.get('/api/vision/state').json['remotes'][0]['stream_id']==s['id']
+
+@pytest.mark.parametrize('key', ['sat', 'tv', 'aux', 'input'])
+@pytest.mark.parametrize('transport', ['sgs', 'rf'])
+def test_added_mode_keys(client, monkeypatch, key, transport):
+    import jamboree.app as legacy
+    _, r = seed(client)
+    fn = Mock(return_value={'ok': True, 'via': transport})
+    monkeypatch.setattr(legacy.ctl, 'handle_auto_remote', fn)
+    response = client.post(f"/api/vision/remotes/{r['id']}/command",
+                           json={'button': key, 'duration': 3000, 'transport': transport})
+    assert response.status_code == 200
+    fn.assert_called_once_with('1', 'H', key, 3000, force=transport)
+
+@pytest.mark.parametrize('combo', ['dvr', 'home'])
+def test_unpair_uses_rf_and_locks_other_commands(client, monkeypatch, combo):
+    import jamboree.app as legacy
+    seed(client)
+    route = '/api/vision/settops/H/command'
+    def unpair(alias, **kwargs):
+        assert alias == 'H' and kwargs == {'combo': combo}
+        assert client.post(route, json={'button': 'guide'}).status_code == 409
+        return {'ok': True, 'via': 'dart'}
+    monkeypatch.setattr(legacy.ctl, 'unpair', unpair)
+    assert client.post(route, json={'button': 'unpair', 'combo': combo,
+                                    'transport': 'sgs'}).status_code == 200
+    assert client.post(route, json={'button': 'unpair', 'combo': 'bad'}).status_code == 400
+    dart = Mock(return_value={'ok': True, 'via': 'dart'})
+    monkeypatch.setattr(legacy.ctl, 'dart', dart)
+    assert client.post(route, json={'button': 'reset'}).status_code == 200
+    dart.assert_called_once_with('H', 'reset', 'reset')
+
+@pytest.mark.parametrize('combo', ['dvr', 'home'])
+def test_unpair_timing_and_releases(monkeypatch, combo):
+    from jamboree.controller import Controller
+    import jamboree.controller as module
+    ctl = Controller()
+    monkeypatch.setattr(ctl, '_canonical_alias', lambda alias: alias)
+    events = []
+    monkeypatch.setattr(ctl, 'dart', lambda alias, key, action: events.append((key, action)))
+    monkeypatch.setattr(module.time, 'sleep', lambda seconds: events.append(('sleep', seconds)))
+    assert ctl.unpair('H', combo)['via'] == 'dart'
+    assert events == [('sat', 'down'), ('sleep', 3.0), ('sat', 'up'),
+                      ('sleep', .2), (combo, 'down'), ('guide', 'down'),
+                      ('sleep', 3.0), ('sat', 'up'), (combo, 'up'),
+                      ('guide', 'up'), ('allup', 'allup')]
+    events.clear()
+    def fail_press(alias, key, action):
+        events.append((key, action))
+        if key == 'guide' and action == 'down':
+            raise RuntimeError('port lost')
+    monkeypatch.setattr(ctl, 'dart', fail_press)
+    with pytest.raises(RuntimeError, match='port lost'):
+        ctl.unpair('H', combo)
+    assert events[-4:] == [('sat', 'up'), (combo, 'up'), ('guide', 'up'), ('allup', 'allup')]
