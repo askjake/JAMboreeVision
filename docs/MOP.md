@@ -913,3 +913,12 @@ verified FFmpeg `bin` directory. Review any truncated entries and restore missin
 user entries using a known backup or the preserved process snapshot as evidence.
 Leave the machine PATH intact. If the folder check fails, locate both executables
 in the extracted FFmpeg distribution before changing PATH.
+
+## Shared Windows service deployment
+
+For a department-wide URL independent of interactive login, follow
+[WINDOWS-SERVICE.md](WINDOWS-SERVICE.md). The implementation is
+`deploy/windows/Manage-Service.ps1`, with portable configuration/migration logic
+in `vision/windows_service.py`. Use one always-on DART/video host and browser-only
+clients. The guide includes install, data/account migration, restricted firewall,
+physical acceptance, logout/reboot validation, logs, update, rollback and removal.

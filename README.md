@@ -285,3 +285,12 @@ verified FFmpeg `bin` directory. Review any truncated entries and restore missin
 user entries using a known backup or the preserved process snapshot as evidence.
 Leave the machine PATH intact. If the folder check fails, locate both executables
 in the extracted FFmpeg distribution before changing PATH.
+
+## One shared Windows service for the department
+
+Use [the Windows service deployment guide](docs/WINDOWS-SERVICE.md) for one
+always-on host and a shared `http://HOSTNAME:5004` URL. It includes a ZIP-based
+installation without Git, explicit Python/FFmpeg paths, LocalService identity,
+configuration migration, department-subnet firewall rule, rotating serial logs,
+automatic startup/recovery, staged updates, and code rollback. Clients need only
+a browser. Native Windows service/hardware acceptance is required before rollout.
