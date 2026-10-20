@@ -240,3 +240,48 @@ workflow, select **RF only**, select the required tap/hold duration (including
 this sends a key and does not itself verify pairing. No stream is required.
 Mic commands appear in command history; RF traffic also appears in terminal
 TX/RX logs. This button sends the remote key, not audio from the browser's mic.
+
+
+### Windows: FFmpeg is not found after a PATH update
+
+Do not use `setx PATH "$env:PATH;..."`. It does not update the current terminal
+and can truncate the persisted value to 1,024 characters. If its warning has
+already appeared, keep the original PowerShell window open and preserve its
+process PATH before closing it. The process PATH may still contain entries
+lost from the saved user PATH; it is a merged process value, not an exact backup
+of the original user PATH, so do not blindly write it back as the user PATH.
+
+Run in that original PowerShell window (replace the FFmpeg folder if different):
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    $backup = Join-Path $env:USERPROFILE ('jv-path-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
+    [ordered]@{
+        ProcessPath = $env:PATH
+        UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        MachinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    } | ConvertTo-Json | Set-Content -LiteralPath $backup -Encoding UTF8
+    Write-Host "PATH snapshot: $backup"
+    $ffmpegBin = 'C:\ffmpeg\ffmpeg-master-latest-win64-gpl\bin'
+    foreach ($tool in 'ffmpeg.exe', 'ffprobe.exe') {
+        if (-not (Test-Path -LiteralPath (Join-Path $ffmpegBin $tool) -PathType Leaf)) {
+            throw "Missing $tool in $ffmpegBin. Check the extracted folder."
+        }
+    }
+    $env:PATH = "$ffmpegBin;$env:PATH"
+    ffmpeg -version
+    if ($LASTEXITCODE -ne 0) { throw 'FFmpeg verification failed' }
+    ffprobe -version
+    if ($LASTEXITCODE -ne 0) { throw 'ffprobe verification failed' }
+}
+```
+
+Launch Vision from this same terminal so it inherits the working PATH. This fix
+changes only the current process and its children; it does not repair a user
+PATH already truncated by setx. For a persistent installation, use Windows
+**Edit environment variables for your account → Path → Edit → New** to add the
+verified FFmpeg `bin` directory. Review any truncated entries and restore missing
+user entries using a known backup or the preserved process snapshot as evidence.
+Leave the machine PATH intact. If the folder check fails, locate both executables
+in the extracted FFmpeg distribution before changing PATH.
