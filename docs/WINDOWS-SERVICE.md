@@ -209,3 +209,34 @@ SQLite/WAL migration, refusal to overwrite, and locking against a running instan
 Native Windows SCM, LocalService, firewall, logout/reboot, serial hardware, and
 SGS credential behavior require the host acceptance above. This environment
 cannot claim those Windows service checks have passed.
+
+
+## Resume an installation interrupted by the original ACL bug
+
+The first service installer recursively removed inherited permissions while
+applying directory inheritance flags. On the affected host, this left files such
+as the virtual environment's `python.exe` with empty ACLs. The corrected routine
+sets protected permissions on each boundary directory and enables inheritance
+on descendants. System/Administrators retain full access; LocalService gets
+read/execute on code and modify on data/logs. No Users/Everyone grant is added.
+
+Replace only `deploy\windows\Manage-Service.ps1` in your extracted source with
+the corrected montjac version and unblock that downloaded script under
+RemoteSigned. For an installation that failed **before service registration**, use:
+
+```powershell
+$source = 'C:\Users\invidijobs.CTEST\Documents\JAMboreeVision-montjac'
+Unblock-File -LiteralPath "$source\deploy\windows\Manage-Service.ps1"
+& "$source\deploy\windows\Manage-Service.ps1" -Action ResumeInstall -SourceDirectory $source -ReleaseDirectory 'C:\ProgramData\JAMboreeVision\releases\20261020-112451-626' -PythonExe 'C:\Program Files\Python311\python.exe' -FFmpegDirectory 'C:\ffmpeg\ffmpeg-master-latest-win64-gpl\bin' -WinSWExe 'C:\Install\WinSW-x64.exe' -WinSWSha256 '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA' -AllowedSubnet '172.20.33.0/24'
+```
+
+These paths/hash/subnet identify the reported host and downloaded wrapper;
+substitute the actual staged release for another installation. ResumeInstall
+requires an existing staged venv under this root's releases directory and refuses
+an already registered service or existing installation manifest. It repairs
+permissions, checks the existing dependencies/imports, generates configuration,
+and completes registration/startup. It does not recreate the venv or reinstall
+dependencies. If configuration was meant to be imported and has not yet been
+copied, include the same `-ImportDataDirectory` option as the original install.
+The native file-ACL regression is included in the Windows CI job; host service
+acceptance remains required.

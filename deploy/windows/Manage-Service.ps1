@@ -1,9 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('Install','Update','Rollback','Start','Stop','Status','Uninstall')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('Install','ResumeInstall','Update','Rollback','Start','Stop','Status','Uninstall')][string]$Action,
     [string]$Root = "$env:ProgramData\JAMboreeVision",
     [string]$SourceDirectory = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$PythonExe,
+    [string]$ReleaseDirectory,
     [string]$FFmpegDirectory,
     [string]$WinSWExe,
     [string]$WinSWSha256,
@@ -40,8 +41,14 @@ function Stop-Wrapper {
     if ((Get-Service JAMboreeVision).Status -ne 'Stopped') { Invoke-Native $wrapper @('stop') }
 }
 function Grant-Tree([string]$Directory, [string]$ServiceRights) {
+    # Protect this boundary directory, then let descendants inherit its ACEs.
+    # Applying /inheritance:r with directory-only flags recursively can leave
+    # file DACLs empty (observed on the Windows service host).
     Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($Directory,'/inheritance:r','/grant:r',
-        '*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F',"*S-1-5-19:(OI)(CI)$ServiceRights",'/T','/Q')
+        '*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F',"*S-1-5-19:(OI)(CI)$ServiceRights",'/Q')
+    foreach ($child in Get-ChildItem -LiteralPath $Directory -Force) {
+        Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($child.FullName,'/inheritance:e','/T','/Q')
+    }
 }
 $Root = [IO.Path]::GetFullPath($Root)
 $wrapper = Join-Path $Root 'service\JAMboreeVision.exe'
@@ -54,7 +61,7 @@ if ($Action -eq 'Status') {
 }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { throw 'Run PowerShell as Administrator for service changes' }
-if ($Action -ne 'Install') {
+if ($Action -notin @('Install','ResumeInstall')) {
     if (-not (Test-Path $settingsFile)) { throw "No installation manifest at $settingsFile" }
     $installation = Get-Content $settingsFile -Raw | ConvertFrom-Json
     $Port = [int]$installation.port
@@ -93,9 +100,17 @@ foreach ($file in 'vision\__main__.py','requirements.txt') {
 foreach ($file in 'ffmpeg.exe','ffprobe.exe') {
     if (-not $FFmpegDirectory -or -not (Test-Path -LiteralPath (Join-Path $FFmpegDirectory $file))) { throw "Supply -FFmpegDirectory containing $file" }
 }
-if ($Action -eq 'Install') {
+if ($Action -in @('Install','ResumeInstall')) {
     if (Get-Service JAMboreeVision -ErrorAction SilentlyContinue) { throw 'Service already exists; use Update' }
-    if (Test-Path $Root) { throw "Choose an empty installation root; $Root already exists" }
+    if ($Action -eq 'Install' -and (Test-Path $Root)) { throw "Choose an empty installation root; $Root already exists" }
+    if ($Action -eq 'ResumeInstall') {
+        if (-not $ReleaseDirectory) { throw 'ResumeInstall requires -ReleaseDirectory for the staged release' }
+        $ReleaseDirectory = [IO.Path]::GetFullPath($ReleaseDirectory)
+        $releasesRoot = [IO.Path]::GetFullPath((Join-Path $Root 'releases')).TrimEnd('\') + '\'
+        if (-not $ReleaseDirectory.StartsWith($releasesRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Staged release must be under this installation releases directory' }
+        if (-not (Test-Path -LiteralPath "$ReleaseDirectory\.venv\Scripts\python.exe")) { throw 'Staged virtual environment not found' }
+        if (Test-Path $settingsFile) { throw 'Installation manifest exists; use normal service operations' }
+    }
     if (-not $AllowedSubnet -or $AllowedSubnet -in @('Any','*','0.0.0.0/0')) { throw 'Supply the department client IPv4 subnet, e.g. 192.168.19.0/24' }
     $parts = $AllowedSubnet.Split('/')
     $address = $null
@@ -112,19 +127,24 @@ if ($Action -eq 'Install') {
     Copy-Item -LiteralPath $WinSWExe -Destination $wrapper
     Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $Root 'service\Manage-Service.ps1')
 }
-$release = Join-Path $Root ('releases\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
-New-Item -ItemType Directory -Path $release | Out-Null
-foreach ($item in 'vision','jamboree','requirements.txt','README.md','docs') {
-    Copy-Item -LiteralPath (Join-Path $SourceDirectory $item) -Destination $release -Recurse
+if ($Action -eq 'ResumeInstall') {
+    $release = $ReleaseDirectory
+    Grant-Tree $release 'RX'
+} else {
+    $release = Join-Path $Root ('releases\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    New-Item -ItemType Directory -Path $release | Out-Null
+    foreach ($item in 'vision','jamboree','requirements.txt','README.md','docs') {
+        Copy-Item -LiteralPath (Join-Path $SourceDirectory $item) -Destination $release -Recurse
+    }
+    Get-ChildItem $release -Directory -Filter __pycache__ -Recurse | Remove-Item -Recurse -Force
+    Invoke-Native $PythonExe @('-m','venv',"$release\.venv")
+    Invoke-Native "$release\.venv\Scripts\python.exe" @('-m','pip','install','-r',"$release\requirements.txt")
+    Grant-Tree $release 'RX'
 }
-Get-ChildItem $release -Directory -Filter __pycache__ -Recurse | Remove-Item -Recurse -Force
-Invoke-Native $PythonExe @('-m','venv',"$release\.venv")
 $releasePython = "$release\.venv\Scripts\python.exe"
 Set-Location -LiteralPath $release
-Invoke-Native $releasePython @('-m','pip','install','-r',"$release\requirements.txt")
 Invoke-Native $releasePython @('-m','pip','check')
 Invoke-Native $releasePython @('-c','import vision.app, waitress, serial, keyring, filelock')
-Grant-Tree $release 'RX'
 $newConfig = "$config.next"
 Invoke-Native $releasePython @('-m','vision.windows_service','xml','--app-dir',$release,'--data-dir',"$Root\data",'--ffmpeg-dir',$FFmpegDirectory,'--log-dir',"$Root\logs",'--port',"$Port",'--output',$newConfig)
 if ($Action -eq 'Update') {
