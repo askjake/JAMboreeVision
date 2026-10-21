@@ -49,3 +49,45 @@ def test_running_source_cannot_be_migrated(tmp_path):
     with FileLock(str(old/'server.lock')):
         with pytest.raises(Timeout):
             migrate(old, tmp_path/'new')
+
+
+def test_migration_waits_for_stopping_instance(tmp_path):
+    import threading
+    old, new = tmp_path/'old', tmp_path/'new'
+    old.mkdir()
+    (old/'base.txt').write_text('fixture')
+    held = threading.Event()
+    release = threading.Event()
+    def holder():
+        with FileLock(str(old/'server.lock')):
+            held.set()
+            release.wait(5)
+    thread = threading.Thread(target=holder)
+    thread.start()
+    assert held.wait(2)
+    timer = threading.Timer(.15, release.set)
+    timer.start()
+    try:
+        migrate(old, new, lock_timeout=2)
+        assert (new/'base.txt').read_text() == 'fixture'
+    finally:
+        release.set()
+        thread.join(3)
+        timer.cancel()
+
+
+def test_migration_timeout_never_copies_or_removes_held_lock(tmp_path):
+    old, new = tmp_path/'old', tmp_path/'new'
+    old.mkdir()
+    (old/'base.txt').write_text('fixture')
+    with FileLock(str(old/'server.lock')):
+        with pytest.raises(Timeout):
+            migrate(old, new, lock_timeout=.1)
+        assert not (new/'base.txt').exists()
+        assert (old/'server.lock').exists()
+
+
+@pytest.mark.parametrize('timeout', [-1,121,float('inf'),float('nan')])
+def test_migration_timeout_validation(tmp_path, timeout):
+    with pytest.raises(ValueError, match='timeout'):
+        migrate(tmp_path, tmp_path/'new', lock_timeout=timeout)

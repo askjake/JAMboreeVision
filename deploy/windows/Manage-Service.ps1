@@ -42,6 +42,7 @@ function Start-Wrapper {
 }
 function Stop-Wrapper {
     if ((Get-Service JAMboreeVision).Status -ne 'Stopped') { Invoke-Native $wrapper @('stop') }
+    (Get-Service JAMboreeVision).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(35))
 }
 function Grant-Tree([string]$Directory, [string]$ServiceRights) {
     # Protect this boundary directory, then let descendants inherit its ACEs.
@@ -157,7 +158,7 @@ if ($Action -eq 'Update') {
     Stop-Wrapper
     $backup = Join-Path $Root ('backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
     try {
-        Invoke-Native $releasePython @('-m','vision.windows_service','migrate','--source',"$Root\data",'--target',$backup)
+        Invoke-Native $releasePython @('-m','vision.windows_service','migrate','--source',"$Root\data",'--target',$backup,'--lock-timeout','35')
         Copy-Item $newConfig $config -Force
         Start-Wrapper
         Copy-Item $transaction "$config.previous" -Force

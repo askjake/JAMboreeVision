@@ -261,3 +261,33 @@ starts the new release, and checks HTTP readiness. Existing stream/settop/remote
 assets remain in the shared data directory. An update interrupts current video
 sessions; hard-refresh each browser afterward (Ctrl+F5 on Windows). Verify Go live,
 pause/seek preservation, and the DART controls on the intended hardware.
+
+### Update rolls back with `server.lock` unavailable
+
+An update can reach SCM's Stopped state while the old application child is still
+releasing the shared data lock. The updater now waits for SCM Stopped and allows
+35 seconds for the backup operation to acquire the source instance lock. The
+standalone migration command retains its immediate-failure default; only Update
+opts into this bounded wait. The lock is held throughout the copy, and existing
+destination configuration is checked under the lock.
+
+If the lock remains unavailable, the update refuses to copy and restarts the
+previous release. Do not delete `data\server.lock`, bypass locking, or kill all
+Python processes. Check for another application using the same data directory
+and inspect the service/child process command lines and logs before retrying.
+A lock filename existing on disk is not proof of an active lock owner.
+
+After a successful update, check the actual served files, not just the service
+status or the newest directory under `releases`:
+
+```powershell
+$html = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:5004/').Content
+$html.Contains('DART power reset (99)')
+$js = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:5004/vision-static/app.js').Content
+$js.Contains("button('Go live'")
+```
+
+Both should return True for the live-player release. If localhost serves the new
+files but another browser shows the old UI, verify that browser's host/port and
+hard-refresh it. A release directory left by a failed update is a prepared
+candidate, not evidence that it is serving requests.

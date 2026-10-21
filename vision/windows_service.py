@@ -4,6 +4,7 @@ XML generation is portable so it can be verified without installing a service.
 The PowerShell operator script owns Windows SCM/firewall operations.
 """
 import argparse
+import math
 from pathlib import Path
 import shutil
 import sqlite3
@@ -59,16 +60,21 @@ def service_xml(app_dir, data_dir, ffmpeg_dir, log_dir, port=5004):
     return ET.tostring(root, encoding='unicode') + '\n'
 
 
-def migrate(source, target):
+def migrate(source, target, lock_timeout=0):
     """Copy known durable files only, taking source/destination instance locks."""
+    lock_timeout = float(lock_timeout)
+    if not math.isfinite(lock_timeout) or not 0 <= lock_timeout <= 120:
+        raise ValueError("Lock timeout must be between 0 and 120 seconds")
     source, target = Path(source).resolve(), Path(target).resolve()
     if not source.is_dir() or source == target:
         raise ValueError('Choose an existing source data directory distinct from the destination')
     target.mkdir(parents=True, exist_ok=True)
     names = ('base.txt', 'assets.sqlite3', 'cert.pem', 'key.pem', 'sgs_credentials.dpapi.json')
-    if any((target / n).exists() for n in names):
-        raise ValueError('Destination already contains configuration; migration will not overwrite it')
-    with FileLock(str(source / 'server.lock'), timeout=0), FileLock(str(target / 'server.lock'), timeout=0):
+    # SCM can report Stopped before the child process releases its data lock.
+    # Wait only when explicitly requested; never unlink or bypass a held lock.
+    with FileLock(str(source / 'server.lock'), timeout=lock_timeout), FileLock(str(target / 'server.lock'), timeout=0):
+        if any((target / n).exists() for n in names):
+            raise ValueError('Destination already contains configuration; migration will not overwrite it')
         for filename in names:
             src = source / filename
             if not src.is_file():
@@ -90,9 +96,10 @@ def main():
     migration = sub.add_parser('migrate')
     migration.add_argument('--source', required=True)
     migration.add_argument('--target', required=True)
+    migration.add_argument('--lock-timeout', type=float, default=0)
     args = p.parse_args()
     if args.action == 'migrate':
-        migrate(args.source, args.target)
+        migrate(args.source, args.target, lock_timeout=args.lock_timeout)
     else:
         Path(args.output).write_text(service_xml(args.app_dir, args.data_dir, args.ffmpeg_dir, args.log_dir, args.port), encoding='utf-8')
 
