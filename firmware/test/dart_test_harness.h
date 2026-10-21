@@ -25,6 +25,52 @@
 #include <vector>
 #include <cstdint>
 
+/* --------------------- harness self-protection --------------------------
+ * A deliberately defective firmware candidate must produce a BOUNDED, clearly
+ * attributed test failure, never a harness crash.  Two things are therefore
+ * guaranteed here:
+ *
+ *   1. Every accessor the tests use to look into the remote model or the pin
+ *      logs is range-checked.  An out-of-range read reports a HARNESS-FAULT
+ *      and returns a sentinel that cannot compare equal to any legal value,
+ *      so the assertion that depended on it still fails - it just fails
+ *      cleanly instead of reading past the end of a vector.
+ *   2. The observation logs cannot grow without limit.  A firmware that spins
+ *      (for example one that never stops presenting a key) hits a cap, the cap
+ *      is reported, and settle() stops early instead of running the full
+ *      bounded window while allocating.
+ *
+ * None of this relaxes an assertion: for a correct candidate every accessor is
+ * in range and no cap is reached, which the suite asserts explicitly at the
+ * end of the run via dartHarnessFaults() and the high-water report.
+ * ---------------------------------------------------------------------- */
+extern int g_pass, g_fail;
+extern std::vector<std::string> g_failures;
+extern std::string g_currentTest;
+extern int g_harnessFaults;
+/* High-water marks of the observation logs, for cap-headroom reporting. */
+extern size_t g_hwChannelEdges, g_hwResetEdges, g_hwOut, g_hwKeysSeen;
+
+/* Caps are set far above anything the correct firmware produces; the
+ * high-water report at the end of a run shows the actual margin. */
+static const size_t DART_MAX_PIN_EDGES   = 200000;
+static const size_t DART_MAX_KEYS_SEEN   = 50000;
+static const size_t DART_MAX_OUT_BYTES   = 8u * 1024u * 1024u;
+
+inline void dartHarnessFault(const char* what) {
+  g_harnessFaults++;
+  g_fail++;
+  char m[320];
+  snprintf(m, sizeof(m), "HARNESS FAULT: %s   [%s]", what, g_currentTest.c_str());
+  g_failures.push_back(m);
+  printf("    HARNESS-FAULT %s   [%s]\n", what, g_currentTest.c_str());
+}
+
+/* Sentinels: deliberately outside the value domain of a key byte, a register
+ * byte and a millisecond timestamp, so no assertion can accidentally pass. */
+#define DART_NO_BYTE (-1)
+#define DART_NO_TIME (0xFFFFFFFFu)
+
 /* ----------------------------- FakeHal ---------------------------------- */
 struct PinEdge { uint32_t t; uint8_t channel; bool high; };
 
@@ -46,16 +92,44 @@ class FakeHal : public DartHal {
 
   uint32_t millis() override { return now; }
 
+  /* Set when any observation log hit its cap: the firmware under test is
+   * producing unbounded activity.  Reported, never silently ignored. */
+  bool logOverflow = false;
+
   void writeChannel(uint8_t ch, bool high) override {
     if (ch >= DART_REMOTE_COUNT) { irqMisuse = true; return; }
-    if (channelHigh[ch] != high) channelEdges.push_back(PinEdge{now, ch, high});
+    if (channelHigh[ch] != high) {
+      if (channelEdges.size() >= DART_MAX_PIN_EDGES) logOverflow = true;
+      else channelEdges.push_back(PinEdge{now, ch, high});
+      if (channelEdges.size() > g_hwChannelEdges) g_hwChannelEdges = channelEdges.size();
+    }
     channelHigh[ch] = high;
   }
   void writeSharedReset(bool high) override {
-    if (resetHigh != high) resetEdges.push_back(PinEdge{now, 0xFF, high});
+    if (resetHigh != high) {
+      if (resetEdges.size() >= DART_MAX_PIN_EDGES) logOverflow = true;
+      else resetEdges.push_back(PinEdge{now, 0xFF, high});
+      if (resetEdges.size() > g_hwResetEdges) g_hwResetEdges = resetEdges.size();
+    }
     resetHigh = high;
   }
-  void print(const char* text) override { out += text; }
+  void print(const char* text) override {
+    if (out.size() >= DART_MAX_OUT_BYTES) { logOverflow = true; return; }
+    out += text;
+    if (out.size() > g_hwOut) g_hwOut = out.size();
+  }
+
+  /* Range-checked pin-log readers. */
+  uint32_t channelEdgeTime(int idx) const {
+    if (idx >= 0 && (size_t)idx < channelEdges.size()) return channelEdges[(size_t)idx].t;
+    dartHarnessFault("FakeHal::channelEdgeTime index out of range");
+    return DART_NO_TIME;
+  }
+  uint32_t resetEdgeTime(int idx) const {
+    if (idx >= 0 && (size_t)idx < resetEdges.size()) return resetEdges[(size_t)idx].t;
+    dartHarnessFault("FakeHal::resetEdgeTime index out of range");
+    return DART_NO_TIME;
+  }
 
   uint8_t irqSave() override {
     uint8_t prev = (uint8_t)(irqDepth == 0 ? 0x80 : 0x00);
@@ -130,8 +204,29 @@ class RemoteMaster {
     uint8_t buf[DART_I2C_REPLY_LEN];
     const uint8_t n = core_->onI2cRequest(buf, sizeof(buf));
     lastReply.assign(buf, buf + (n ? n : 0));
-    if (n >= 4) keysSeen.push_back(buf[3]);
+    if (n >= 4) {
+      if (keysSeen.size() >= DART_MAX_KEYS_SEEN) keyOverflow = true;
+      else keysSeen.push_back(buf[3]);
+      if (keysSeen.size() > g_hwKeysSeen) g_hwKeysSeen = keysSeen.size();
+    }
     reads++;
+  }
+
+  /* Set when this channel's key log hit its cap. */
+  bool keyOverflow = false;
+
+  /* Range-checked readers.  Out of range is a HARNESS FAULT plus a sentinel
+   * that cannot equal a legal key or register byte, so the dependent
+   * assertion still fails rather than reading out of bounds. */
+  int keyAt(size_t i) const {
+    if (i < keysSeen.size()) return (int)keysSeen[i];
+    dartHarnessFault("RemoteMaster::keyAt index out of range");
+    return DART_NO_BYTE;
+  }
+  int replyAt(size_t i) const {
+    if (i < lastReply.size()) return (int)lastReply[i];
+    dartHarnessFault("RemoteMaster::replyAt index out of range");
+    return DART_NO_BYTE;
   }
   /* Simulate the remote circuit rebooting (it will re-init). */
   void remoteReset() { pendingRead_ = false; pendingAck_ = false; reads = 0; acks = 0; }
@@ -221,8 +316,21 @@ class DartBus {
 
   /* Settle: run until nothing is outstanding - no transaction, no queued
    * command, no reset pulse and no scheduled release.  Bounded. */
+  /* True when any observation log hit its cap on this bus. */
+  bool logOverflowed() const {
+    if (hal.logOverflow) return true;
+    for (uint8_t c = 0; c < DART_REMOTE_COUNT; ++c)
+      if (master[c].keyOverflow) return true;
+    return false;
+  }
+
   void settle(uint32_t maxMs = 40000) {
     for (uint32_t i = 0; i < maxMs; ++i) {
+      if (logOverflowed()) {
+        dartHarnessFault("firmware produced unbounded activity; settle() aborted "
+                         "at an observation-log cap");
+        return;
+      }
       if (core.txnStage() == DART_TXN_IDLE && core.queueDepth() == 0 &&
           !core.resetting() && !releasePending()) {
         advance(2);
@@ -242,9 +350,6 @@ class DartBus {
 };
 
 /* --------------------------- tiny test runner --------------------------- */
-extern int g_pass, g_fail;
-extern std::vector<std::string> g_failures;
-extern std::string g_currentTest;
 
 #define CHECK(cond)                                                            \
   do {                                                                         \

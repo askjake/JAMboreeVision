@@ -33,6 +33,8 @@
 int g_pass = 0, g_fail = 0;
 std::vector<std::string> g_failures;
 std::string g_currentTest;
+int g_harnessFaults = 0;
+size_t g_hwChannelEdges = 0, g_hwResetEdges = 0, g_hwOut = 0, g_hwKeysSeen = 0;
 
 static volatile sig_atomic_t g_stop = 0;
 static void onSig(int) { g_stop = 1; }

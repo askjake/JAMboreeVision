@@ -10,6 +10,8 @@
 int g_pass = 0, g_fail = 0;
 std::vector<std::string> g_failures;
 std::string g_currentTest;
+int g_harnessFaults = 0;
+size_t g_hwChannelEdges = 0, g_hwResetEdges = 0, g_hwOut = 0, g_hwKeysSeen = 0;
 
 /* Button numbers used by JAMboreeVision (jamboree/commands.py). */
 enum {
@@ -146,10 +148,10 @@ static void test_command_forms() {
     DartBus b; b.begin();
     b.send("5 7 down"); b.settle();
     CHECK_EQ(b.master[4].keysSeen.size(), 1u);
-    CHECK_EQ(b.master[4].keysSeen[0], 0x97);
+    CHECK_EQ(b.master[4].keyAt(0), 0x97);
     b.send("5 7 up"); b.settle();
     CHECK_EQ(b.master[4].keysSeen.size(), 2u);
-    CHECK_EQ(b.master[4].keysSeen[1], 0x17);
+    CHECK_EQ(b.master[4].keyAt(1), 0x17);
   }
 }
 
@@ -423,7 +425,16 @@ static void test_ack_faults() {
     CHECK(b.core.stats().ackEarly >= 1u);
   }
 
-  TEST("a late ACK from an earlier transaction cannot confirm the next one");
+  /* SCOPE OF THIS TEST - read with docs/DART-FIRMWARE.md "ACK ambiguity".
+   * The late ACK below is injected while the NEXT transaction is still only
+   * PRESENTED (nobody has read it), which is the window the firmware can
+   * detect: an ACK arriving before any read must belong to an earlier
+   * transaction, so it is counted as ackEarly and ignored.
+   * This does NOT demonstrate - and the I2C contract cannot provide - immunity
+   * to a late ACK that arrives INSIDE the next transaction's READ window.
+   * There is no transaction id and no master address, so that case is
+   * genuinely indistinguishable from the expected ACK. */
+  TEST("a late ACK arriving before the next transaction's read is not credited");
   {
     DartBus b; b.begin();
     b.master[0].doAck = false;                 /* txn 1 will go uncertain */
@@ -479,20 +490,20 @@ static void test_ack_faults() {
     b.master[0].doOneRead();
     CHECK_EQ(b.master[0].lastReply.size(), (size_t)DART_I2C_REPLY_LEN);
     CHECK_EQ(b.master[0].lastReply.size(), (size_t)15);
-    CHECK_EQ(b.master[0].lastReply[0], 0xAF);
-    CHECK_EQ(b.master[0].lastReply[1], 0x01);
-    CHECK_EQ(b.master[0].lastReply[2], 0x01);
-    CHECK_EQ(b.master[0].lastReply[3], DART_I2C_KEY_NONE);
+    CHECK_EQ(b.master[0].replyAt(0), 0xAF);
+    CHECK_EQ(b.master[0].replyAt(1), 0x01);
+    CHECK_EQ(b.master[0].replyAt(2), 0x01);
+    CHECK_EQ(b.master[0].replyAt(3), DART_I2C_KEY_NONE);
     for (size_t i = 4; i < b.master[0].lastReply.size(); ++i)
-      CHECK_EQ(b.master[0].lastReply[i], 0x00);
+      CHECK_EQ(b.master[0].replyAt(i), 0x00);
 
     /* Byte 0 becomes BLANK on the first read after an ACK, as in legacy. */
     b.send("1 4 down");
     b.settle();
     b.master[0].doOneRead();
-    CHECK_EQ(b.master[0].lastReply[0], 0x00);
+    CHECK_EQ(b.master[0].replyAt(0), 0x00);
     b.master[0].doOneRead();
-    CHECK_EQ(b.master[0].lastReply[0], 0xAF);
+    CHECK_EQ(b.master[0].replyAt(0), 0xAF);
   }
 }
 
@@ -521,7 +532,7 @@ static void test_no_stale_cross_channel() {
     for (size_t i = 0; i < b.master[7].keysSeen.size(); ++i) {
       CHECK(b.master[7].keysSeen[i] != 0x83);
     }
-    CHECK_EQ(b.master[7].keysSeen[0], 0xEF);
+    CHECK_EQ(b.master[7].keyAt(0), 0xEF);
     CHECK(!b.core.isHeld(8, 0x83));
     CHECK(b.core.isHeld(8, 0xEF));
   }
@@ -598,7 +609,7 @@ static void test_duplicates() {
     b.send("1 35 up"); b.settle();
     CHECK_EQ(b.core.heldCount(1), 0);
     CHECK_EQ(b.master[0].keysSeen.size(), 1u);
-    CHECK_EQ(b.master[0].keysSeen[0], 0x6F);
+    CHECK_EQ(b.master[0].keyAt(0), 0x6F);
   }
 }
 
@@ -682,7 +693,7 @@ static void test_shared_reset() {
     b.master[0].doRead = true;
     b.master[0].keysSeen.clear();
     b.master[0].doOneRead();
-    CHECK_EQ(b.master[0].keysSeen[0], DART_I2C_KEY_NONE);
+    CHECK_EQ(b.master[0].keyAt(0), DART_I2C_KEY_NONE);
   }
 }
 
@@ -746,7 +757,7 @@ static void test_saturation() {
     for (size_t i = 0; i < b.hal.channelEdges.size(); ++i)
       if (b.hal.channelEdges[i].channel == 0 && !b.hal.channelEdges[i].high) upIdx = (int)i;
     CHECK(upIdx >= 0);
-    CHECK(b.hal.channelEdges[upIdx].t <= 420u);
+    CHECK(b.hal.channelEdgeTime(upIdx) <= 420u);
     CHECK(b.core.debugEnabled());
     b.send("debug off");
     CHECK(!b.core.debugEnabled());
@@ -1033,7 +1044,12 @@ static void test_adversarial_timing() {
     CHECK_EQ(b.core.stats().txnConfirmed, 0u);
   }
 
-  TEST("a late ACK from channel 1 cannot confirm channel 2's in-flight DOWN");
+  /* SCOPE: as above, the late ACK lands while channel 2's DOWN is still only
+   * PRESENTED.  The firmware rejects it because nothing had been read yet -
+   * NOT because it can attribute the ACK to channel 1.  The slave Wire API
+   * exposes no master address, so cross-channel ACK attribution is impossible
+   * in this protocol and is never claimed.  See docs/DART-FIRMWARE.md. */
+  TEST("a cross-channel late ACK before the next read is counted early, not credited");
   {
     DartBus b; b.begin();
     /* Channel 1 reads but never ACKs: its DOWN ends UNCERTAIN. */
@@ -1132,6 +1148,21 @@ int main() {
   test_saturation();
   test_idle_and_recovery();
   test_adversarial_timing();
+
+  /* The harness must itself be sound for the run above to mean anything: no
+   * accessor may have read out of range and no observation log may have hit
+   * its cap.  A deliberately defective candidate trips these and reports a
+   * bounded HARNESS-FAULT instead of crashing the process. */
+  TEST("harness integrity: no out-of-range observation and no log cap reached");
+  {
+    printf("    observation high-water: channelEdges=%zu/%zu resetEdges=%zu/%zu "
+           "keysSeen=%zu/%zu out=%zu/%zu bytes\n",
+           g_hwChannelEdges, DART_MAX_PIN_EDGES,
+           g_hwResetEdges, DART_MAX_PIN_EDGES,
+           g_hwKeysSeen, DART_MAX_KEYS_SEEN,
+           g_hwOut, DART_MAX_OUT_BYTES);
+    CHECK_EQ(g_harnessFaults, 0);
+  }
 
   printf("\n=== %d checks passed, %d failed ===\n", g_pass, g_fail);
   if (g_fail) {

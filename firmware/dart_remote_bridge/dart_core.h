@@ -32,6 +32,15 @@
  *   - "acked" means some master acknowledged after that read.
  *   - Neither proves the receiver executed RF, and this firmware never claims
  *     a set-top box was controlled.
+ *   - An ACK that arrives BEFORE anything read the current key must belong to
+ *     an earlier transaction, so it is counted (ackEarly) and ignored.  But an
+ *     ACK that arrives INSIDE the current transaction's READ window is
+ *     INDISTINGUISHABLE from the expected one, whichever remote sent it.  No
+ *     correlation logic here or anywhere else can resolve that case with this
+ *     contract; allowing only one outstanding transaction bounds the damage to
+ *     that single transaction instead of a FIFO of stale keys, and the
+ *     ackEarly/ackStray/ackDuplicate counters in "qstat" expose the symptom.
+ *     This firmware therefore does NOT claim per-remote ACK correlation.
  */
 #ifndef DART_CORE_H
 #define DART_CORE_H
