@@ -1,0 +1,42 @@
+# Verification layers for the DART bridge firmware.
+#
+# The dart_core.cpp compiled here is byte-for-byte the file the Arduino build
+# uses, so these suites exercise the real firmware logic, not a reimplementation.
+#
+#   make run        native regression suite (host g++)
+#   make sanitize   same suite under AddressSanitizer + UndefinedBehaviorSanitizer
+#   make reference  reproduce the ORIGINAL sketch's defects (vendored verbatim)
+#
+# None of these targets touch /dev/ttyACM0, the operator's base.txt, or any
+# running service.
+CXX      ?= g++
+CXXFLAGS ?= -std=c++11 -O1 -g -Wall -Wextra -Wshadow -Werror \
+            -DDART_HOST_BUILD=1 -I../dart_remote_bridge -I.
+SRC  = dart_tests.cpp ../dart_remote_bridge/dart_core.cpp
+BIN  = dart_tests
+
+all: $(BIN)
+
+$(BIN): $(SRC) dart_test_harness.h ../dart_remote_bridge/dart_core.h \
+        ../dart_remote_bridge/dart_board_config.h ../dart_remote_bridge/dart_hal.h
+	$(CXX) $(CXXFLAGS) -o $@ $(SRC)
+
+run: $(BIN)
+	./$(BIN)
+
+sanitize:
+	$(CXX) -std=c++11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
+	  -DDART_HOST_BUILD=1 -I../dart_remote_bridge -I. -o dart_tests_asan $(SRC)
+	./dart_tests_asan
+
+# Independent confirmation that the ORIGINAL sketch really has the defects the
+# candidate claims to fix.  Requires -fpermissive: the original passes a
+# const char* where an int millisecond delay is expected.
+reference:
+	$(MAKE) -C reference run
+
+clean:
+	rm -f $(BIN) dart_tests_asan
+	$(MAKE) -C reference clean
+
+.PHONY: all run sanitize reference clean
