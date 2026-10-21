@@ -6,6 +6,10 @@
 #   make run        native regression suite (host g++)
 #   make sanitize   same suite under AddressSanitizer + UndefinedBehaviorSanitizer
 #   make reference  reproduce the ORIGINAL sketch's defects (vendored verbatim)
+#   make pty_sim    virtual DART board on a PTY, for application integration
+#   make vision     JAMboreeVision -> virtual serial integration test
+#   make emulate    compiled-AVR execution of dart_core.cpp in simavr
+#   make all-layers everything that needs no physical hardware
 #
 # None of these targets touch /dev/ttyACM0, the operator's base.txt, or any
 # running service.
@@ -14,6 +18,7 @@ CXXFLAGS ?= -std=c++11 -O1 -g -Wall -Wextra -Wshadow -Werror \
             -DDART_HOST_BUILD=1 -I../dart_remote_bridge -I.
 SRC  = dart_tests.cpp ../dart_remote_bridge/dart_core.cpp
 BIN  = dart_tests
+PYTHON ?= python3
 
 all: $(BIN)
 
@@ -35,8 +40,27 @@ sanitize:
 reference:
 	$(MAKE) -C reference run
 
-clean:
-	rm -f $(BIN) dart_tests_asan
-	$(MAKE) -C reference clean
+# Virtual DART board exposed on a PTY so the application can be driven
+# end-to-end with no hardware.
+pty_sim: pty_sim.cpp dart_test_harness.h ../dart_remote_bridge/dart_core.cpp
+	$(CXX) -std=c++11 -O1 -g -Wall -Wextra -DDART_HOST_BUILD=1 \
+	  -I../dart_remote_bridge -I. -o pty_sim pty_sim.cpp \
+	  ../dart_remote_bridge/dart_core.cpp
 
-.PHONY: all run sanitize reference clean
+# Drives real JAMboreeVision code paths against pty_sim using a throwaway
+# JAMBOREE_BASE / JAMBOREE_VISION_DATA.  Never reads the live configuration.
+vision: pty_sim
+	cd ../.. && $(PYTHON) firmware/test/vision_virtual_serial_test.py
+
+# Compiled-MCU emulation.  Exits 77 (skip) if simavr/avr-gdb are absent.
+emulate:
+	$(MAKE) -C emu run
+
+all-layers: run sanitize reference emulate vision
+
+clean:
+	rm -f $(BIN) dart_tests_asan pty_sim
+	$(MAKE) -C reference clean
+	$(MAKE) -C emu clean
+
+.PHONY: all run sanitize reference vision emulate all-layers clean
