@@ -24,24 +24,50 @@ function render(){
 }
 function renderRemotes(){const list=$('#remote-list');list.replaceChildren();const q=$('#remote-search').value.toLowerCase();for(const r of controlTargets().filter(r=>r.name.toLowerCase().includes(q))){const b=button('',()=>{selectTarget(r.id);},'remote-item'+(active===r.id?' active':''));b.append(el('strong',r.name),el('small',r.stb_alias+(r.stream_id?' · video linked':'')));list.append(b);}if(!controlTargets().length)list.append(el('p','Add or import a settop in Settops & remotes to enable control.','muted'));}
 function renderChecks(){const box=$('#stream-checks');box.replaceChildren();for(const s of state.streams){const l=el('label',undefined,'stream-check'),c=el('input');c.type='checkbox';c.checked=selected.has(s.id);c.onchange=run(()=>toggleStream(s.id,c.checked));const title=el('span',labelFor(s));title.append(el('small',s.name));l.append(c,title);box.append(l);}if(!state.streams.length)box.append(el('p','Add or discover streams in the Streams tab.','muted'));}
-function renderActive(){const r=activeTarget();$('#active-remote-name').textContent=r?.name||'Select a remote';$('#active-remote-detail').textContent=r?(r.missing_settop?'Settop missing — edit this remote':`${r.stb_alias} · ${state.stbs[r.stb_alias]?.protocol||''}`):'Add a settop to begin; video is optional.';streamOptions($('#console-link'),r?.stream_id);$('#console-link').disabled=!r;$('#watch-linked').disabled=!r?.stream_id;document.querySelectorAll('[data-key]').forEach(b=>b.disabled=!r||r.missing_settop||busy);}
+function renderActive(){const r=activeTarget();$('#active-remote-name').textContent=r?.name||'Select a remote';$('#active-remote-detail').textContent=r?(r.missing_settop?'Settop missing — edit this remote':`${r.stb_alias} · ${state.stbs[r.stb_alias]?.protocol||''}`):'Add a settop to begin; video is optional.';streamOptions($('#console-link'),r?.stream_id);$('#console-link').disabled=!r;$('#watch-linked').disabled=!r?.stream_id;document.querySelectorAll('[data-key]').forEach(b=>b.disabled=!r||r.missing_settop||busy);renderVideoTargets();}
 async function linkRemote(r,id){const result=await api('/api/vision/remotes'+(r.direct?'':'/'+r.id),r.direct?'POST':'PUT',{name:r.name,stb_alias:r.stb_alias,stream_id:id});if(r.direct)active=result.remote.id;await refresh();notice('Stream link saved');}
 $('#console-link').onchange=run(()=>linkRemote(activeTarget(),$('#console-link').value));
 $('#watch-linked').onclick=run(()=>toggleStream(activeTarget().stream_id,true));
 $('#remote-search').oninput=renderRemotes;$('#refresh').onclick=run(refresh);
 for(let n=1;n<=9;n++){const b=el('button',String(n));b.dataset.key=n;$('#numbers').append(b);}
-document.querySelectorAll('[data-key]').forEach(b=>b.onclick=run(async()=>{if(!active||busy)return;busy=true;renderActive();$('#command-status').textContent='Sending '+b.textContent+'…';try{const target=activeTarget();const route=target.direct?`/api/vision/settops/${encodeURIComponent(target.stb_alias)}/command`:`/api/vision/remotes/${target.id}/command`;const j=await api(route,'POST',{button:b.dataset.key,duration:Number($('#duration').value),transport:$('#transport').value,combo:$('#unpair-combo').value});$('#command-status').textContent=b.dataset.key==='unpair'?'RF unpair sequence sent; verify the remote is unpaired.':`Sent via ${j.via} · ${j.feedback||'Command completed'}`;}catch(e){$('#command-status').textContent=e.message;throw e;}finally{busy=false;renderActive();run(refreshHistory)();}}));
-async function toggleStream(id,on){if(on)selected.add(id);else selected.delete(id);localStorage.setItem('jv-selected',JSON.stringify([...selected]));renderChecks();await syncPlayers();}
-async function syncPlayers(){for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(!selected.has(id)||!s||p.source!==s.url||p.mode!==s.mode)await removePlayer(id);}for(const id of selected){if(!players.has(id)){const s=state.streams.find(s=>s.id===id);if(s)await addPlayer(s);}}for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(s)p.title.textContent=labelFor(s);}$('#video-count').textContent=players.size+' selected';$('#video-empty').style.display=players.size?'none':'block';}
+document.querySelectorAll('[data-key]').forEach(b=>b.onclick=run(async()=>{if(!active||busy)return;const target=activeTarget();busy=true;renderActive();$('#command-status').textContent='Sending '+b.textContent+' to '+target.name+'…';try{const route=target.direct?`/api/vision/settops/${encodeURIComponent(target.stb_alias)}/command`:`/api/vision/remotes/${target.id}/command`;const j=await api(route,'POST',{button:b.dataset.key,duration:Number($('#duration').value),transport:$('#transport').value,combo:$('#unpair-combo').value});$('#command-status').textContent=b.dataset.key==='unpair'?target.name+': RF unpair sequence sent; verify the remote is unpaired.':`${target.name}: sent via ${j.via} · ${j.feedback||'Command completed'}`;}catch(e){$('#command-status').textContent=e.message;throw e;}finally{busy=false;renderActive();run(refreshHistory)();}}));
+async function toggleStream(id,on){if(on){selected.add(id);selectVideoRemote(id);}else selected.delete(id);localStorage.setItem('jv-selected',JSON.stringify([...selected]));renderChecks();await syncPlayers();}
+async function syncPlayers(){for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(!selected.has(id)||!s||p.source!==s.url||p.mode!==s.mode)await removePlayer(id);}for(const id of selected){if(!players.has(id)){const s=state.streams.find(s=>s.id===id);if(s)await addPlayer(s);}}for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(s)p.title.textContent=labelFor(s);}renderVideoTargets();$('#video-count').textContent=players.size+' selected';$('#video-empty').style.display=players.size?'none':'block';}
+function videoTargets(id){return controlTargets().filter(r=>r.stream_id===id&&!r.missing_settop);}
+function selectVideoRemote(id){
+ const linked=videoTargets(id);
+ if(linked.length===1){selectTarget(linked[0].id);return;}
+ if(linked.length>1&&!linked.some(r=>r.id===active))notice('This stream has multiple remotes. Choose its Control button below the video.');
+}
+function renderVideoTargets(){
+ for(const [id,p]of players){
+  const linked=videoTargets(id),key=JSON.stringify(linked.map(r=>[r.id,r.name,r.stb_alias]));
+  if(p.linksKey!==key){
+   p.linksKey=key;p.targets.replaceChildren();
+   if(!linked.length)p.targets.append(el('span','Video only · no remote linked','muted'));
+   for(const r of linked){const b=button('',()=>selectTarget(r.id),'video-control');b.dataset.remoteId=r.id;b.title=r.name+' controls '+r.stb_alias;p.targets.append(b);}
+  }
+  for(const b of p.targets.querySelectorAll('button')){
+   const r=linked.find(r=>r.id===b.dataset.remoteId),chosen=r.id===active;
+   b.textContent=(chosen?'Controlling: ':'Control: ')+r.name;
+   b.classList.toggle('active',chosen);b.setAttribute('aria-pressed',String(chosen));
+  }
+  p.card.classList.toggle('remote-active',linked.some(r=>r.id===active));
+  p.card.setAttribute('aria-label',p.title.textContent+(linked.length?' · select linked remote':' · video only'));
+ }
+}
 async function removePlayer(id){const p=players.get(id);if(!p)return;players.delete(id);p.dead=true;clearTimeout(p.retry);p.live?.destroy();p.hls?.destroy();p.video.pause();p.video.removeAttribute('src');p.video.load();p.card.remove();try{await api(`/api/vision/streams/${id}/release`,'POST',{viewer});}catch{} }
 async function addPlayer(s){
- const card=el('article',undefined,'video-card'),head=el('div',undefined,'video-head'),title=el('strong',labelFor(s)),video=el('video'),status=el('div','Starting stream…','video-state');
+ const card=el('article',undefined,'video-card'),head=el('div',undefined,'video-head'),title=el('strong',labelFor(s)),video=el('video'),status=el('div','Starting stream…','video-state'),targets=el('div',undefined,'video-targets');
  video.controls=true;video.muted=true;video.playsInline=true;
  const live=button('Go live',()=>players.get(s.id)?.live?.goLive(),'go-live');
  live.title='Return to the latest available video and resume following live';
  head.append(title,live,button('Retry',()=>loadPlayer(s.id)),button('✕',()=>toggleStream(s.id,false)));
- card.append(head,video,status);$('#video-grid').append(card);
- const p={card,video,status,title,source:s.url,mode:s.mode,hls:null,live:null,retry:null,dead:false,loading:false};players.set(s.id,p);await loadPlayer(s.id);
+ card.tabIndex=0;card.dataset.streamId=s.id;
+ card.addEventListener('click',e=>{if(!e.target.closest('button,input,select,a'))selectVideoRemote(s.id);});
+ card.addEventListener('keydown',e=>{if(e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();selectVideoRemote(s.id);}});
+ card.append(head,video,targets,status);$('#video-grid').append(card);
+ const p={card,video,status,title,targets,linksKey:null,source:s.url,mode:s.mode,hls:null,live:null,retry:null,dead:false,loading:false};players.set(s.id,p);renderVideoTargets();await loadPlayer(s.id);
 }
 async function loadPlayer(id){
  const p=players.get(id);if(!p||p.loading)return;p.loading=true;clearTimeout(p.retry);

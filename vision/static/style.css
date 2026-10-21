@@ -7,3 +7,7 @@
 #history-all{width:auto}
 
 .video-head{flex-wrap:wrap}.video-head strong{flex:1 1 130px}.video-state[data-playback=live]{color:var(--accent)}.video-state[data-playback=delayed],.video-state[data-playback=paused]{color:#f0c37b}
+
+.video-card.remote-active{border-color:var(--accent);box-shadow:0 0 0 2px #63dfbe44}.video-card:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.video-targets{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px}.video-targets button{padding:4px 8px;font-size:11px}.video-targets .active{color:var(--accent);border-color:var(--accent);background:#203d3a}
+
+.video-control{max-width:100%;overflow-wrap:anywhere;text-align:left}

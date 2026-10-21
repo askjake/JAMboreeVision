@@ -64,6 +64,39 @@ console.log('PASS: direct settop control, command during hung video, command aft
 const j=await(await fetch(cfg.url+'/_test/commands')).json();assert.equal(j.commands[0].args[1],'DOM Hopper');assert.equal(j.commands[0].args[2],'guide');
 assert.equal(d.querySelector('.video-head strong').textContent,'DOM Remote-stream');assert.equal(d.querySelector('.go-live').textContent,'Go live');assert.equal(d.querySelector('#toast').className,'');await wait(()=>d.querySelector('#video-count').textContent==='1 selected');console.log('PASS: DOM UI bootstrap, settop/stream/remote forms, persistent links, selected video window, command dispatch');
 
+// Clicking an offline video selects its remote without sending a command.
+async function post(path,data){const response=await fetch(cfg.url+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const json=await response.json();assert.equal(response.ok,true,JSON.stringify(json));return json;}
+await post('/api/vision/settops',{alias:'Second Hopper',protocol:'SGS',ip:'127.0.0.1',role:'hopper'});
+const secondStream=(await post('/api/vision/streams',{name:'Second video',url:cfg.stream+'?second=1'})).stream;
+const secondRemote=(await post('/api/vision/remotes',{name:'Second Remote',stb_alias:'Second Hopper',stream_id:secondStream.id})).remote;
+w.fetch=(p,o)=>String(p).endsWith('/play')?Promise.resolve({ok:false,json:async()=>({ok:false,error:'Fixture offline'})}):normalFetch(p,o);
+d.querySelector('#refresh').click();await wait(()=>d.querySelector('#remote-table').textContent.includes('Second Remote'));
+d.querySelectorAll('#stream-checks input')[1].click();await wait(()=>d.querySelectorAll('video').length===2);
+const cards=[...d.querySelectorAll('.video-card')],firstCard=cards[0],secondCard=cards[1];
+assert.equal(d.querySelector('#active-remote-name').textContent,'Second Remote');
+const beforeSelect=await(await fetch(cfg.url+'/_test/commands')).json();
+firstCard.querySelector('video').click();assert.equal(d.querySelector('#active-remote-name').textContent,'DOM Remote');
+assert.equal(firstCard.classList.contains('remote-active'),true);assert.equal(secondCard.classList.contains('remote-active'),false);
+assert.deepEqual((await(await fetch(cfg.url+'/_test/commands')).json()).commands,beforeSelect.commands);
+secondCard.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.equal(d.querySelector('#active-remote-name').textContent,'Second Remote');
+firstCard.querySelector('.go-live').click();assert.equal(d.querySelector('#active-remote-name').textContent,'Second Remote');
+d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#command-status').textContent.includes('sgs_fixture'));
+const afterSelection=await(await fetch(cfg.url+'/_test/commands')).json();assert.equal(afterSelection.commands.at(-1).args[1],'Second Hopper');
+// Two remotes share the first stream: do not guess which STB to control.
+const firstId=firstCard.dataset.streamId;
+await post('/api/vision/remotes',{name:'Shared Remote',stb_alias:'Second Hopper',stream_id:firstId});
+d.querySelector('#refresh').click();await wait(()=>firstCard.querySelectorAll('.video-control').length===2);
+firstCard.querySelector('video').click();assert.equal(d.querySelector('#active-remote-name').textContent,'Second Remote');
+[...firstCard.querySelectorAll('.video-control')].find(b=>b.textContent.includes('Shared Remote')).click();
+assert.equal(d.querySelector('#active-remote-name').textContent,'Shared Remote');
+assert.equal(firstCard.querySelector('[aria-pressed=true]').textContent,'Controlling: Shared Remote');
+// Removing a link updates existing cards; a video-only window does not choose another remote.
+await fetch(cfg.url+'/api/vision/remotes/'+secondRemote.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...secondRemote,stream_id:null})});
+d.querySelector('#refresh').click();await wait(()=>secondCard.querySelector('.video-targets').textContent.includes('no remote linked'));
+secondCard.querySelector('video').click();assert.equal(d.querySelector('#active-remote-name').textContent,'Shared Remote');
+w.fetch=normalFetch;
+console.log('PASS: video/keyboard remote selection, actual command target, active highlighting, shared choices, unlinked video, live-button independence');
+
 const picker=d.querySelector('#config-file');let pickerClicked=false;picker.click=()=>{pickerClicked=true};d.querySelector('#import-config').click();assert.equal(pickerClicked,true);
 const config=JSON.stringify({stbs:{'Imported Hopper':{protocol:'SGS',ip:'192.0.2.1'}}});
 async function choose(text){Object.defineProperty(picker,'files',{configurable:true,value:[{name:'base.txt',size:text.length,text:async()=>text}]});await picker.onchange();}

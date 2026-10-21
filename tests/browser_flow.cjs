@@ -23,6 +23,14 @@ const os=require('node:os'),path=require('node:path');
  await page.locator('#editor-form button[type="submit"]').click();await page.locator('#editor').waitFor({state:'hidden'});
  await page.locator('[data-tab="console"]').click();await page.locator('#watch-linked').click();
  await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v.currentTime>0&&v.videoWidth>0;},{},{timeout:45000});
+ // An actual video card selects its linked remote without restarting playback.
+ await page.request.post(config.url+'/api/vision/settops',{data:{alias:'Other Hopper',protocol:'SGS',role:'hopper',ip:'127.0.0.1'}});
+ await page.request.post(config.url+'/api/vision/remotes',{data:{name:'Other Remote',stb_alias:'Other Hopper'}});
+ await page.locator('#refresh').click();
+ await page.locator('#remote-list button').filter({hasText:'Other Remote'}).click();
+ await page.locator('.video-head strong').click();
+ await page.waitForFunction(()=>document.querySelector('#active-remote-name').textContent==='Bench Remote');
+ assert.equal(await page.locator('.video-card.remote-active').count(),1);
  // Native pause must stay paused; Go live must resume near the moving HLS edge.
  await page.evaluate(()=>document.querySelector('video').pause());
  await page.waitForFunction(()=>document.querySelector('.video-state').textContent.startsWith('Paused'));
@@ -42,10 +50,10 @@ const os=require('node:os'),path=require('node:path');
  await page.locator('.video-head button').last().click();
  await second.waitForFunction(()=>document.querySelector('video')?.currentTime>1,{},{timeout:15000});
  state=await(await page.request.get(config.url+'/api/vision/state')).json();assert.equal(Object.values(state.playback)[0].viewers,1);
- await page.locator('[data-tab="assets"]').click();await page.locator('#remote-table button').filter({hasText:'Edit'}).click();await page.locator('#editor-fields [name="name"]').fill('Renamed Remote');await page.locator('#editor-form button[type="submit"]').click();await page.locator('#editor').waitFor({state:'hidden'});
+ await page.locator('[data-tab="assets"]').click();await page.locator('#remote-table tr').filter({hasText:'Bench Remote'}).locator('button').filter({hasText:'Edit'}).click();await page.locator('#editor-fields [name="name"]').fill('Renamed Remote');await page.locator('#editor-form button[type="submit"]').click();await page.locator('#editor').waitFor({state:'hidden'});
  const resolved=await(await page.request.get(config.url+'/api/vision/resolve/Renamed%20Remote-stream')).json();assert.equal(resolved.stream.name,'Bench video');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#remote-table').textContent.includes('Renamed Remote'));
  await page.setViewportSize({width:390,height:844});await page.locator('[data-tab="console"]').click();await page.screenshot({path:path.join(os.tmpdir(),'jv-mobile.png'),fullPage:true});
- assert.deepEqual(errors,[]);console.log('PASS: browser CRUD, stream links, actual HLS playback, pause preservation, Go live, remote dispatch, shared viewers, rename, reload, mobile layout.');
+ assert.deepEqual(errors,[]);console.log('PASS: browser CRUD, stream links, actual HLS playback, pause preservation, Go live, video-to-remote selection, remote dispatch, shared viewers, rename, reload, mobile layout.');
  }finally{if(browser)await browser.close();if(config){try{await fetch(config.url+'/_test/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch{fixture.kill('SIGTERM');}}else fixture.kill('SIGTERM');}
 })().catch(e=>{console.error(e);process.exitCode=1;});

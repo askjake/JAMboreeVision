@@ -333,3 +333,22 @@ Player regression checks: `npm run test:player` (Node 22+), `npm run test:dom`
 (after `npm install`), and the optional real-browser acceptance flow
 `npm run test:browser`. The Python suite checks exact DART wire output and history
 for direct settop and remote-profile routes, including forced SGS selection.
+
+
+## Select a remote by clicking its video
+
+Click a visible video window or its title to activate the remote linked to that
+saved stream. Selecting a stream checkbox also activates its uniquely linked
+remote. The matching window receives an accent outline, its Control button reads
+**Controlling: <remote name>**, and the remote console/history follow that target.
+The action selects a target only; it does not send an STB command, restart video,
+change playback position, or alter stream associations. It works even if the video
+is buffering or offline. Keyboard users can focus the card and press Enter/Space,
+or use its ordinary Control button.
+
+If multiple remotes share a stream, choose the named **Control:** button below
+the video; the app preserves the current target rather than guessing. A video-only
+stream with no linked remote leaves the current target unchanged and is labeled
+**Video only · no remote linked**. Go live, Retry and Close remain independent
+player controls. Editing remote/stream links and refreshing inventory updates the
+choices and outlines on existing windows without reloading playback.
