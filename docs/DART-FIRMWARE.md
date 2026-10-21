@@ -14,15 +14,43 @@ flashed, no port was opened, and no running service was restarted.**
 
 ### 1.1 The original sketch
 
-Two copies of the original exist and they are **not identical**:
+#### Installed firmware identity: NOT VERIFIED
 
-| Copy | SHA-256 | Notes |
+**No banner was ever read from the attached board during this work.** No serial
+port was opened (see section 2.1), so there is no captured startup string, no
+timestamp of a capture, and no command that produced one. Any statement about
+what is *installed* on the board is therefore unverified.
+
+The only installed-identity datum available is **operator-supplied**: the
+captured hardware banner reported to this work as
+
+```
+11.05.2024 Jake Montgomery (That Was Good)
+```
+
+That string does **not** belong to either copy of
+`DART_16Remotes_Buffered_Handshake_TxAck_Timestamps.ino`. Both of those print
+`Jacob Montgomery - Spreading the JAM 2025-11-12[a]`. The supplied banner
+matches a **different and older sketch family**, the legacy
+`askjake/JAMboree DART_Dumb.ino`, which `docs/DART-TROUBLESHOOTING.md` already
+records as printing exactly that line at startup. On the evidence available,
+the installed firmware is more likely to be from the `DART_Dumb.ino` family
+than from the 16-remote sketch.
+
+No newer physical banner was observed. If a newer banner exists it was not
+captured here, and nothing in this package should be read as implying one.
+
+#### The two source copies
+
+Both are **host-supplied reference material, installed identity unverified**:
+
+| Copy | SHA-256 | Status |
 |---|---|---|
-| `DART_16Remotes_Buffered_Handshake_TxAck_Timestamps.ino` as found on the host (CRLF) | `faf8a220d5353c5d952e9e0943da020e78ef6c7a99d744fe00a117fc47ec3e8a` | **Authoritative.** Banner `2025-11-12a`. Vendored verbatim as `firmware/test/reference/reference_sketch.ino.txt` (same hash). |
+| `DART_16Remotes_Buffered_Handshake_TxAck_Timestamps.ino` as found on the host (CRLF) | `faf8a220d5353c5d952e9e0943da020e78ef6c7a99d744fe00a117fc47ec3e8a` | **Host-supplied reference, installed identity unverified.** Banner `2025-11-12a`. Vendored verbatim as `firmware/test/reference/reference_sketch.ino.txt` (same hash). Used as the defect-reproduction subject. |
 | Same file, LF-normalised | `017268ee1b28ca162a20d9331a456fc04734fda5e5c9d7a429a12e334b573dee` | For comparison only. |
-| `askjake/JAMboreeLite` git copy (LF) | `4bef150b083d2c69659df1c861b1695455c02dd7e32aa3a6ad47f96b1a68e6f5` | Banner `2025-11-12`. Differs in **three** lines. |
+| `askjake/JAMboreeLite` git copy (LF) | `4bef150b083d2c69659df1c861b1695455c02dd7e32aa3a6ad47f96b1a68e6f5` | Host-supplied reference. Banner `2025-11-12`. Differs in three lines. |
 
-The three differences (LF-normalised `diff`) are material:
+The three differences (LF-normalised `diff`):
 
 ```
 122c122   const unsigned long MAX_HELD_MS = 5000;   (host)  vs  3000  (git)
@@ -30,8 +58,19 @@ The three differences (LF-normalised `diff`) are material:
 370c370   resetRemote(remoteNum, "80");             (host)  vs  resetRemote(remoteNum, 80);
 ```
 
-The **pointer-as-delay defect exists only in the host copy**, which is the copy
-that matches the deployed banner. All defect reproduction uses the host copy.
+**Attribution limits, which the rest of this document observes:**
+
+* The **pointer-as-delay defect exists only in the host CRLF copy.** It is real
+  and fully reproduced (section 3.1), and that reproduction stands on its own
+  as a source-level finding.
+* It is **not attributed to the installed firmware.** Neither the defect nor its
+  ~32.3 second shared-reset consequence can be claimed for the deployed board,
+  because the installed firmware was never identified.
+* Because the supplied banner points at a different sketch family, the installed
+  firmware may well not contain this call site at all.
+* Determining what is actually installed requires opening the port or reading
+  flash, both of which are excluded here and both of which appear as explicit
+  steps in the hardware trial procedure (section 9).
 
 ### 1.2 The candidate
 
@@ -104,13 +143,41 @@ properties `vid=0x2341 pid=0x0058`, which match exactly.
 **Conclusion:** the attached board is an **Arduino Nano Every**, FQBN
 `arduino:megaavr:nona4809`, MCU **ATmega4809**, 48 KiB flash / 6144 B SRAM.
 
+#### Evidence that the port was not opened — and the limits of that evidence
+
+The full command inventory and its scope limits are in `hw-evidence.txt`. In
+summary, the only things run against the device or its metadata were: `ls -la`
+(stat, no open), sysfs attribute reads, `readlink` on the tty class symlink,
+open-file-descriptor snapshots, `arduino-cli board details` (local index only),
+and one `avrdude -v` invocation that printed its version banner with no part,
+no programmer and no `-P` port argument.
+
+Two point-in-time scans of `/proc/<pid>/fd/*` found no process holding
+`/dev/ttyACM0`. That evidence is deliberately **not** overstated:
+
+* the scans are **snapshots, not continuous monitoring**, so they cannot prove
+  the node was never opened between them;
+* `/proc/<pid>/fd` is readable only for processes owned by this user, so a root
+  or other-user holder would not appear;
+* the evidence covers **this session only** and says nothing about earlier use.
+
+**Device-node mtime is not used as evidence anywhere in this package.** The
+mtime of a character device reflects node creation and udev activity, not
+`open()` calls, so it cannot establish that a port was never opened. An earlier
+draft of this report used it that way; that claim has been withdrawn.
+
+The defensible statement is narrower: **no command issued during this work
+opens a serial port**, and the two snapshots found no holder.
+
 ### 2.2 Residual uncertainty — read this before flashing
 
 The identification is strong but **not complete**, and the gaps matter:
 
 1. **The USB descriptor is emitted by the on-board SAMD11 bridge, not by the
    ATmega4809.** It proves the board model, not the silicon behind it. Reading
-   the actual MCU signature requires the bootloader/UPDI, which is excluded.
+   the actual MCU signature requires UPDI, which is excluded here — but it is
+   achievable with no extra hardware over this same port, and it is stage 9.3
+   step 10 of the trial procedure.
 2. **The wiring is unverified.** Nothing in read-only USB metadata reveals
    which pins are connected to the 16 remote circuits or to the shared reset
    line. The pin map is inherited from the legacy sketch and is *asserted at
@@ -244,6 +311,13 @@ refusal to target unqualified boards.
 
 ### 3.1 The "pointer-as-delay" defect, in detail
 
+> **Attribution scope.** Everything below is a verified property of the
+> host-supplied source copy and of binaries built from it here. The installed
+> firmware was never identified (section 1.1), and the operator-supplied banner
+> points at a different sketch family, so **none of this is attributed to the
+> board currently in service.** Read it as "this source, built with this
+> toolchain, does this", not as "the deployed board does this".
+
 **The expression.** `firmware/test/reference/reference_sketch.ino.txt:370`,
 inside the Format-B `<r> 99 reset` / `<r> ... reset` handler:
 
@@ -279,7 +353,9 @@ The second warning is the corroborating evidence: the intended `500` is dead
 code. The sketch **builds and is flashable** — this is live behaviour, not a
 build failure.
 
-**Compiled behaviour on the actual target.** From the linked ELF:
+**Compiled behaviour of a Nano Every build made here.** This is a build
+produced by this work from the host-supplied source; it is not a readback of
+installed flash. From the linked ELF:
 
 ```
 $ avr-objdump -d ... | grep -B6 '<_Z11resetRemoteii>'   # the Format-B site
@@ -296,7 +372,7 @@ $ avr-objdump -s -j .rodata ...
 The other three call sites load `0x01F4` (500) or a parsed value. Only this one
 loads the **address of the string literal `"80"`**.
 
-So the compiled firmware executes `delay(32285)`:
+So this build executes `delay(32285)`:
 
 * the **shared reset line is held LOW for ~32.3 seconds**, not 80 ms;
 * all sixteen remote circuits are held in reset for that whole time;
@@ -350,24 +426,26 @@ independent edge-driven I2C master models.
 
 ```
 $ cd firmware/test && make run
-=== 606 checks passed, 0 failed ===
+=== 607 checks passed, 0 failed ===
 ```
 
-**606 individual assertions across 51 independent test scenarios.**
+**607 individual assertions across 52 independent test scenarios.**
 These are different units and are reported separately: a scenario constructs
-one situation, and each `CHECK()` inside it is one assertion. An earlier run of
-this work reported `505/505`; the count is now **606/606** because the
-adversarial scenarios in section 7.3 were added. The figure is regenerated by
+one situation, and each `CHECK()` inside it is one assertion. Earlier runs of this
+work reported `505/505` and then `606/606`; the count is now **607/607** —
+the adversarial scenarios in section 7.3 were added first, and a
+`harness integrity` scenario was added with the harness hardening in
+section 7.2. The figure is regenerated by
 the command above, not quoted from history.
 
 ### 4.2 Sanitizers — PASS
 
 ```
 $ cd firmware/test && make sanitize
-=== 606 checks passed, 0 failed ===
+=== 607 checks passed, 0 failed ===
 ```
 
-Same 606 assertions under `-fsanitize=address,undefined`. **Zero** sanitizer
+Same 607 assertions under `-fsanitize=address,undefined`. **Zero** sanitizer
 diagnostics (`grep -ciE 'ERROR: AddressSanitizer|runtime error|LeakSanitizer'`
 → `0`).
 
@@ -458,7 +536,13 @@ See section 6.
 
 ### 4.7 Physical hardware validation — NOT RUN (out of scope)
 
-Excluded by instruction. Procedure in section 9.
+Excluded by instruction. Staged procedure in section 9.
+
+No serial port was opened and no programming operation was performed. `avrdude`
+**was** executed exactly once, as `avrdude -C <conf> -v`, to read its version
+banner: no `-p` part, no `-c` programmer and no `-P` port, so no device was
+contacted. The full command inventory and the limits of that evidence are in
+`hw-evidence.txt` and summarised in section 2.1.
 
 ---
 
@@ -481,37 +565,89 @@ $ arduino-cli compile -b arduino:megaavr:nona4809:mode=off --clean --warnings al
 The candidate uses **2822 fewer bytes of SRAM** than the original. Both builds
 are warning-clean apart from the core's own `mode=on` speed notice.
 
-### 5.1 Justified stack headroom
+### 5.1 Stack budget — calculated, not measured
 
-Measured with `avr-g++ -mmcu=atmega4809 -fstack-usage` on the real target, not
-estimated. Every frame is reported `dynamic,bounded` — no VLA, no `alloca`, no
-runtime recursion (the pin-map recursion is `constexpr`, compile-time only).
+Full arithmetic and inputs: `stackusage/STACK-BUDGET.txt`, with the raw
+`.su` files alongside it. Three distinct evidence classes are kept separate
+because they have very different strength.
 
-Deepest frames (bytes): `handleLine` 223, `printQstat` 205, `printBanner` 137,
-`printStatus` 133, `finishTxn` 126, `emitOutcome` 122, `startReleaseWork` 120,
-`startQueuedCommand` 113, `err` 98, `beginTxn` 96, `dispatchTokens` 86,
-`enqueue` 64, `tick` 17, `feedSerial` 4, `onI2cRequest` 2, `onI2cReceive` 2.
+**Class 1 — compiler-reported per-function frames.** `avr-g++ 7.3.0
+-fstack-usage`, `-mmcu=atmega4809`, with the same `-Os`/`-D`/`-I` flags as the
+shipped build. **Arduino core, Wire, twi, UART and Print are included**, each
+from its own `.su` file — not just `dart_core.cpp`. Every frame is reported
+`static` or `dynamic,bounded`: no VLA, no `alloca`, no runtime recursion (the
+only recursion is the `constexpr` pin-map validator, evaluated at compile time).
 
-Worst-case main-loop chain:
+| function | bytes | TU |
+|---|---|---|
+| `DartCore::handleLine` | 223 | dart_core |
+| `DartCore::printQstat` | 205 | dart_core |
+| `DartCore::printStatus` | 133 | dart_core |
+| `DartCore::finishTxn` | 126 | dart_core |
+| `DartCore::emitOutcome` | 122 | dart_core |
+| `DartCore::startReleaseWork` | 120 | dart_core |
+| `DartCore::startQueuedCommand` | 113 | dart_core |
+| `DartCore::err` | 98 | dart_core |
+| `DartCore::beginTxn` | 96 | dart_core |
+| `DartCore::dispatchTokens` | 86 | dart_core |
+| `loop()` | 64 | sketch `.ino` |
+| `onRequestTrampoline` | 19 | sketch `.ino` |
+| `__vector_15` / `__vector_14` (TWI ISRs) | 17 / 17 | Wire `twi.c` |
+| `DartCore::tick` | 17 | dart_core |
+| `onReceiveTrampoline` | 13 | sketch `.ino` |
+| `TwoWire::write(const uint8_t*, size_t)` | 10 | Wire |
+| `UartClass::write(uint8_t)` | 8 | core UART |
+| `ArduinoDartHal::print` | 8 | sketch `.ino` |
+| `digitalWrite` | 8 | core wiring_digital |
+| `DartCore::onI2cRequest` / `onI2cReceive` | 2 / 2 | dart_core |
+
+**Caveat on Class 1:** the shipped build uses `-flto`, and with `-flto` the
+compiler emits **no** `.su` at all, so these numbers come from an otherwise
+identical **non-LTO** compile. Post-LTO inlining in the shipped image can
+change individual frame sizes.
+
+**Class 2 — avr-libc frames read from the linked image.** avr-libc ships
+precompiled, so there is no `.su` for the formatting path that `snprintf()`
+pulls in. These were derived from the disassembly of
+`FINAL_off/dart_remote_bridge.ino.elf`:
+
+| symbol | bytes | derivation |
+|---|---|---|
+| `snprintf` | 18 | 4 registers via `__prologue_saves__+0x1c`, + 14 B locals |
+| `vfprintf` | 29 | 18 registers via `__prologue_saves__+0x00`, + 11 B locals |
+| `__ultoa_invert` | 6 | inline pushes, no frame pointer |
+
+An earlier draft covered this with a blanket "200 B ISR/library allowance".
+That guess has been replaced by the figures above.
+
+**Class 3 — calculated call-chain budget.** This is **arithmetic performed
+here**, summing Class 1 and Class 2 frames along call chains **identified by
+reading the source**. It is not a compiler whole-program analysis.
 
 ```
-loop -> feedSerial(4) -> handleLine(223) -> dispatchTokens(86) -> printQstat(205)   = 518 B
-loop -> tick(17) -> finishTxn(126) -> emitOutcome(122)                              = 265 B
-loop -> tick(17) -> startNextWork(6) -> startReleaseWork(120) -> beginTxn(96)       = 239 B
+WORST  loop(64) + feedSerial(4) + handleLine(223) + dispatchTokens(86)
+       + printQstat(205) + snprintf(18) + vfprintf(29) + __ultoa_invert(6)
+       + 7 return addresses (14)                                    = 649 B
+       transaction reporting chain                                  = 394 B
+       release-start chain                                          = 331 B
+worst ISR chain (AVR does not nest interrupts by default, so only
+one is ever live): __vector_15(17) + onRequestTrampoline(19)
+       + onI2cRequest(2) + TwoWire::write(10) + 8                   =  56 B
+
+calculated worst case = 649 + 56                                   = 705 B
+available for stack + locals (6144 - 1429 globals)                  = 4715 B
+calculated headroom                                                = 4010 B
 ```
 
-The worst path is **518 B**. Adding the `.ino`'s own `loop()` frame (a 48-byte
-buffer plus overhead, ~60 B) and a deliberately generous **200 B** allowance for
-a TWI interrupt nesting on top (ISR register save + `onRequestTrampoline`'s
-15-byte buffer + Wire internals) gives a worst case of about **780 B** against
-**4715 B** available.
+**705 B of a 4715 B budget, i.e. 15.0 %.**
 
-**Headroom ≈ 3935 B, i.e. measured worst case is ~17 % of the available space —
-better than a 6× margin.** By contrast the original left only 1893 B while
-being able to append 4000 bytes to a `String` (R8), which would have collided
-with its own stack.
-
----
+**What is NOT established.** No **stack high-water measurement was performed**,
+so the margin above must be described as a *calculated budget*, never as
+experimentally measured. No measurement of any kind was taken on an ATmega4809
+(no emulator supports it and no hardware was used). The chain enumeration is
+manual and could miss a deeper path. Obtaining a real high-water figure means
+painting SRAM at reset and reading back the unpainted boundary on hardware;
+that is listed as a step in section 9, not claimed here.
 
 ## 6. JAMboreeVision against an isolated virtual serial endpoint
 
@@ -636,25 +772,69 @@ would still pass:
 
 | Mutant | Injected defect | Suite result |
 |---|---|---|
-| M1 | Format-B reset width 80 ms instead of the documented default | **3 assertions fail** (603 pass) |
-| M2 | credit an ACK that arrives before any read | **13 assertions fail** (593 pass) |
-| M3 | shared reset clears only the named remote | **5 assertions fail** (601 pass) |
-| M4 | keep presenting the key after the transaction ends | **27 assertions fail, then SIGSEGV** |
+| M1 | Format-B reset width 80 ms instead of the documented default | **3 assertions fail** (604 pass) |
+| M2 | credit an ACK that arrives before any read | **13 assertions fail** (594 pass) |
+| M3 | shared reset clears only the named remote | **5 assertions fail** (602 pass) |
+| M4 | keep presenting the key after the transaction ends | **198 assertions fail** (422 pass), including 14 `HARNESS-FAULT` reports |
 
-All four are caught. M4 is caught so hard that the *harness* crashes while
-accumulating failures — detection is unambiguous, but the harness could degrade
-more gracefully; that is a known harness limitation, not a firmware issue.
+All four are caught. Raw logs: `logs/MUT_*.txt`.
+
+**Harness hardening (this revision).** M4 previously crashed the harness with a
+SIGSEGV instead of reporting a failure. AddressSanitizer localised it exactly:
+a heap-buffer-overflow at `dart_tests.cpp:152`, where a `CHECK_EQ(size, 2)`
+failed and execution then went on to index `keysSeen[1]` on a shorter vector.
+The same pattern existed at ten other sites, plus a `channelEdges[upIdx]` read
+where `upIdx` can legitimately remain `-1`.
+
+The fix is entirely harness-side and **weakens nothing**:
+
+* every accessor the tests use to look into the remote model or the pin logs is
+  now range-checked (`keyAt`, `replyAt`, `channelEdgeTime`, `resetEdgeTime`).
+  Out of range reports a `HARNESS-FAULT` and returns a sentinel (`-1`, or
+  `0xFFFFFFFF` for a timestamp) that cannot compare equal to any legal value,
+  so the dependent assertion **still fails** — it just fails cleanly;
+* the observation logs are capped (200000 pin edges, 50000 keys per channel,
+  8 MiB of captured output) so a firmware that spins cannot exhaust memory, and
+  `settle()` aborts early with a `HARNESS-FAULT` when a cap is hit;
+* a new final scenario, `harness integrity`, asserts `g_harnessFaults == 0` and
+  prints the observation high-water marks.
+
+For the real candidate every accessor is in range and no cap is approached, so
+the assertions are unchanged in effect. The high-water report proves the margin:
+
+```
+observation high-water: channelEdges=22/200000 resetEdges=2/200000
+                        keysSeen=80/50000 out=25907/8388608 bytes
+```
+
+M4 now terminates with `rc=1`, a complete summary and attributed failures —
+including `g_harnessFaults == 0 (14 vs 0)` — under a deliberately imposed 2 GiB
+address-space limit, and runs clean under AddressSanitizer/UBSan with **zero**
+sanitizer diagnostics. The crash is gone; the detection is not.
 
 ### 7.3 Adversarial scenarios
 
-Late and stray ACKs:
+Late and stray ACKs. The two late-ACK scenarios were **renamed** so their
+names state the window they actually cover instead of implying general ACK
+attribution, which this protocol cannot provide (section 7.4). The assertions
+were not changed:
+
 * `an ACK with no transaction outstanding is counted stray and changes nothing`
 * `a stray ACK during the shared-reset pulse neither confirms nor shortens it`
-* `a late ACK from channel 1 cannot confirm channel 2's in-flight DOWN`
+* `a cross-channel late ACK before the next read is counted early, not credited`
+  — was *"a late ACK from channel 1 cannot confirm channel 2's in-flight DOWN"*
+* `a late ACK arriving before the next transaction's read is not credited`
+  — was *"a late ACK from an earlier transaction cannot confirm the next one"*
 * `a storm of stray ACKs cannot fabricate a confirmation under load`
 * `ACK arriving before the read is not credited (REGRESSION #2)`
-* `a late ACK from an earlier transaction cannot confirm the next one`
 * `duplicate ACK is counted and harmless`
+
+In **both** late-ACK scenarios the stray ACK is injected while the next
+transaction is still only `PRESENTED` — nobody has read it yet. That is the
+window the firmware can detect, because an ACK before any read cannot belong to
+the current transaction. Neither scenario demonstrates, and neither name now
+claims, attribution of an ACK to a particular remote. A source comment at each
+site states this scope.
 
 The cross-channel case asserts the full chain, including the **negative**:
 
@@ -701,10 +881,13 @@ than hidden:
 
 1. `read` means *some* master read the presented key; `acked` means *some*
    master acknowledged after that read.
-2. With exactly one transaction outstanding, an ACK that arrives in the `READ`
-   window is *almost certainly* the right one — but a pathological master that
-   ACKs late, within the next transaction's `READ` window, is
-   **indistinguishable** from the correct master. The mitigation is structural:
+2. An ACK arriving **before** anything read the current key must belong to an
+   earlier transaction, so it is counted (`ackEarly`) and ignored — that is the
+   only late-ACK case the firmware can detect, and it is the case the two
+   renamed tests cover. An ACK arriving **inside** the current transaction's
+   `READ` window is **indistinguishable** from the expected one, whichever
+   remote sent it. **No cross-channel or per-remote ACK correlation is claimed
+   anywhere in this firmware, its tests, or this document.** The mitigation is structural:
    only one outstanding transaction, and the key stops being presented the
    instant the transaction ends, so the blast radius is one transaction rather
    than a FIFO of stale keys. The tests above pin the realistic cases
@@ -725,7 +908,7 @@ git checkout montjac
 cd firmware/test && make all-layers        # run + sanitize + reference + emulate + vision
 
 # or individually
-make run                                   # 606 assertions / 51 scenarios
+make run                                   # 607 assertions / 52 scenarios
 make sanitize                              # same, ASan + UBSan
 make reference                             # 20 original-defect confirmations
 make emulate                               # compiled AVR in simavr (exit 77 if absent)
@@ -753,51 +936,176 @@ with `arduino:megaavr` 1.8.8; for `make emulate` also simavr ≥ 1.6 and a worki
 * The remote-side model rests on the assumptions in section 7.1.
 * `avr-gdb` 7.8 needs ncurses5 compat libraries.
 * The wiring and the number of attached remote circuits remain unverified.
+* The installed firmware was never identified, so no finding here is attributed
+  to the board in service (section 1.1).
+* The stack figure is a calculated budget, not a measured high-water mark, and
+  the `.su` inputs come from a non-LTO compile (section 5.1).
 
 ---
 
 ## 9. Controlled hardware trial and rollback
 
-**Not performed.** Physical access is out of scope. Prerequisites first:
+**Not performed.** No stage below was executed. The stages are deliberately
+separated by the kind of access each one needs, so a reviewer can authorise them
+independently and stop at any boundary.
 
-1. Capture the **current** firmware before overwriting it. The Nano Every
-   bootloader cannot be read over CDC; use the onboard mEDBG/UPDI programmer.
-   **If a byte-exact backup cannot be taken, treat the trial as irreversible
-   for firmware and stop until that is accepted in writing.**
-2. Record the installed banner (`version` at 115200 baud) and keep the original
-   sketch plus the recorded SHA-256 (section 1.1) as the rollback source.
-3. Confirm the wiring against section 2.2 — 16 channels on D2–D13/A0–A3, shared
-   reset on A7, TWI on its own pins — and the number of remote circuits.
-4. Schedule a window: step 6 reboots **all** remote circuits.
+### 9.0 Backup and readback capability — corrected
 
-Then:
+An earlier draft of this report claimed a byte-exact backup "cannot be read over
+CDC" and "requires the onboard mEDBG/UPDI programmer" as if that were extra
+hardware. **That was wrong on both counts.** Verified against the installed
+tools and the official platform implementation:
 
-5. Stop JAMboreeVision (or free the port) so the flash has exclusive access.
-   Flash the identical artefact that was verified:
-   ```
-   arduino-cli upload -b arduino:megaavr:nona4809:mode=off -p /dev/ttyACM0 firmware/dart_remote_bridge
-   ```
-6. Open the port at 115200 and send `version`, `status`, `qstat`. Expect
-   `DART-BRIDGE 2.0.0 2026-10-21 board=NANO_EVERY remotes=16 slots=4`.
-7. Single channel, escalating: `1 83 03 120` (tap) → `1 4 down` / `1 4 up`
-   (host-managed hold) → `1 86 allup`. Check each `[EVT] ... result=` against
-   the observed receiver behaviour. **`confirmed` means the I2C handshake
-   completed, not that the set-top box acted** (section 7.4).
-8. `1 99 reset` **only in the window**: it reboots all sixteen. Verify the pulse
-   is ~500 ms on a scope or logic analyser — this is the first physical test of
-   the R7 fix and of A7 actually being wired.
-9. Re-run the RF unpair for both `dvr` and `home` on one receiver, then the
-   multi-settop batch on at least two channels sharing the board.
-10. Watch `qstat` for `ackEarly`, `ackStray`, `ackDuplicate`, `cmdDropped`,
-    `lineOverflows` and `watchdogReleases`. Non-zero `ackStray`/`ackEarly`
-    indicates real remote-side timing worth investigating before wider rollout.
+* `arduino:megaavr` 1.8.8 `boards.txt` defines
+  `nona4809.upload.protocol=jtag2updi`, `nona4809.upload.speed=115200`,
+  `nona4809.upload.use_1200bps_touch=true`,
+  `nona4809.upload.extra_params=-P{serial.port}`. The official upload path is
+  therefore **avrdude speaking jtag2updi over the same `/dev/ttyACM0` CDC
+  port** — the SAMD11 bridge is the UPDI programmer. No extra hardware.
+* The installed `avrdude 6.3-20190619` (`6.3.0-arduino17`) defines part `m4809`
+  with `signature = 0x1E 0x96 0x51` and `memory "flash"` of `size = 0xC000`,
+  `offset = 0x4000`, `page_size = 0x80`, **`readsize = 0x100`** — i.e. flash
+  **read** is defined, not just write — and programmer `jtag2updi`
+  (`type = jtagmkii_pdi`, serial, 115200).
+* The official `platform.txt` upload recipe uses `-e` (full chip erase) before
+  `-Uflash:w:`, so **any backup must be taken before flashing**; it also writes
+  `fuse2`, `fuse5` and `fuse8`, so those are worth capturing too.
 
-**Rollback.** Re-flash the recorded original sketch with the same `arduino-cli
-upload` command, confirm its banner (`Jacob Montgomery - Spreading the JAM
-2025-11-12a`), then `reset` once to re-synchronise. Note that rolling back
-**reinstates the ~32 s shared-reset stall** (section 3.1) and every other defect
-in section 3, so prefer fixing forward unless the candidate is the proven cause.
+So a byte-exact backup is **expected to be possible with no additional
+hardware**. What is **not** verified, because it needs the programmer:
 
-**Abort immediately if** the banner does not match, any channel reports
+* that the SAMD11 bridge firmware implements UPDI **read** (the upload path only
+  ever exercises erase/write);
+* that UPDI access is not locked on this specific board;
+* that the readback actually succeeds and verifies.
+
+Those are the first things stage 9.3 proves, and the trial must stop if they
+fail.
+
+**Do not assume the installed sketch has a `version` command.** It probably does
+not: the operator-supplied banner points at the `DART_Dumb.ino` family, whose
+console is a numeric/echo style, not a command set. The identity of installed
+firmware is captured by reading its **startup banner** (stage 9.2) and, more
+reliably, from the **flash image itself** (stage 9.3) — not by sending `version`.
+
+### 9.1 Read-only preparation — no port access
+
+No open, no control line, no programmer.
+
+1. Confirm the board is still enumerated and unchanged: re-read
+   `idVendor`/`idProduct`/`serial` from sysfs and compare with section 2.1.
+2. Confirm the candidate artefacts match this package: verify the SHA-256
+   manifest, and that `firmware/` is at the commit recorded in the report.
+3. Re-run every virtual layer (`make all-layers`) on the build host.
+4. **Verify the wiring by inspection** against section 2.3 — 16 channels on
+   D2–D13/A0–A3, shared reset on A7, TWI on its own pins — and record how many
+   remote circuits are actually attached. This is the largest unverified
+   assumption in the package.
+5. Schedule a maintenance window: stage 9.5 reboots **all** remote circuits.
+6. Confirm who owns rollback authority and that an irreversible outcome is
+   acceptable if stage 9.3 fails.
+
+### 9.2 Port opening — read-only serial, no programmer, no flashing
+
+First action that touches the device. Opening the CDC port may or may not reset
+the MCU depending on DTR behaviour; the application deliberately no longer
+toggles DTR (commit `b833c02`), but a terminal might.
+
+7. Free the port: ensure JAMboreeVision is not holding it.
+8. Open at 115200 **read-only** and capture whatever the board emits, plus a
+   timestamp and the exact command used. Record the banner verbatim — this is
+   the first real evidence of installed identity, and it should be compared
+   against `11.05.2024 Jake Montgomery (That Was Good)` and against
+   `Jacob Montgomery - Spreading the JAM 2025-11-12[a]`.
+9. Do **not** send `version` expecting a reply. If a quiescent board prints
+   nothing, that is itself consistent with a banner printed only at power-up.
+
+### 9.3 Programmer access — readback only, still no flashing
+
+This is the gate. It uses UPDI but writes nothing.
+
+10. Confirm the MCU signature, which finally removes the ATmega4809 uncertainty
+    of section 2.2 (the USB descriptor comes from the SAMD11, not the MCU):
+    ```
+    avrdude -C <conf> -c jtag2updi -p m4809 -P /dev/ttyACM0 -b 115200 -v
+    ```
+    Expect `0x1e9651`.
+11. Take the byte-exact backup, **before any erase**:
+    ```
+    avrdude -C <conf> -c jtag2updi -p m4809 -P /dev/ttyACM0 -b 115200 \
+            -U flash:r:dart_installed_$(date -u +%Y%m%dT%H%M%SZ).hex:i \
+            -U fuse2:r:fuse2.hex:h -U fuse5:r:fuse5.hex:h -U fuse8:r:fuse8.hex:h
+    ```
+12. Record the backup's SHA-256 and store it off-box. Sanity-check that the
+    image is not all `0xFF` and that its size is plausible.
+13. Identify the installed firmware from the image: search it for the banner
+    strings above. This answers section 1.1 definitively.
+14. **STOP if the readback failed, is empty, or cannot be verified.** Flashing
+    then becomes irreversible for firmware, which requires explicit written
+    acceptance before continuing.
+
+### 9.4 Flashing the candidate
+
+15. Flash the identical artefact that was verified — same FQBN, same files:
+    ```
+    arduino-cli compile -b arduino:megaavr:nona4809:mode=off --clean firmware/dart_remote_bridge
+    arduino-cli upload  -b arduino:megaavr:nona4809:mode=off -p /dev/ttyACM0 firmware/dart_remote_bridge
+    ```
+    Note this performs the 1200-baud touch and a **chip erase**.
+16. Confirm the new banner:
+    `DART-BRIDGE 2.0.0 2026-10-21 board=NANO_EVERY remotes=16 slots=4`.
+    Then `status` and `qstat` should respond — on the candidate, unlike the
+    installed firmware, these commands do exist.
+17. Optional but recommended, and the only way to turn section 5.1 from a
+    calculated budget into a measurement: take a **stack high-water** reading by
+    painting SRAM at reset and reading back the unpainted boundary after a
+    representative load.
+
+### 9.5 Shared reset — reboots all sixteen remote circuits
+
+Only inside the maintenance window.
+
+18. Single channel first, escalating, watching each `[EVT] ... result=`:
+    `1 83 03 120` (tap) → `1 4 down` / `1 4 up` (host-managed hold) →
+    `1 86 allup`. **`confirmed` means the I2C handshake completed, not that a
+    set-top box acted** (section 7.4).
+19. `1 99 reset` — this asserts the line shared by all sixteen. Verify the pulse
+    is ~500 ms on a scope or logic analyser. This is the first physical proof
+    both that the R7 fix behaves and that A7 is actually wired to the reset line.
+20. Confirm all sixteen channels recover and that `qstat` shows the reset.
+
+### 9.6 RF pairing changes — affects receiver state
+
+Last, because this changes state outside the board.
+
+21. Run RF unpair for `dvr` and then `home` against **one** receiver, and
+    confirm the receiver's observed behaviour separately from the board's
+    `result=` reports.
+22. Then the multi-settop batch across at least two channels sharing the board.
+23. Watch `qstat` for `ackEarly`, `ackStray`, `ackDuplicate`, `cmdDropped`,
+    `lineOverflows`, `watchdogReleases`. Non-zero `ackStray`/`ackEarly` means
+    real remote-side timing worth investigating before wider rollout.
+
+### 9.7 Rollback
+
+Re-flash the image captured in stage 9.3 — the authoritative rollback source is
+that **readback**, not either host-supplied source copy:
+
+```
+avrdude -C <conf> -c jtag2updi -p m4809 -P /dev/ttyACM0 -b 115200 \
+        -U flash:w:dart_installed_<timestamp>.hex:i
+```
+
+Then confirm the original banner returns and power-cycle the remote circuits
+once so handshake state is re-synchronised. If no readback exists, rollback can
+only approximate the original from a host-supplied source copy, and section 1.1
+explains why that is **not** known to be what was installed.
+
+Rolling back also reinstates whatever defects the installed firmware has. Where
+those are the defects reproduced in section 3 — which has not been established
+for the installed image — prefer fixing forward unless the candidate is the
+proven cause.
+
+**Abort immediately if** the new banner does not match, any channel reports
 `result=failed` consistently, the reset pulse is not ~500 ms, or the shared
 reset does not recover all sixteen circuits.
