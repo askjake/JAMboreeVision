@@ -255,8 +255,8 @@ def create_app(data_dir=None):
         if force not in {'auto', 'sgs', 'rf'}:
             raise ValueError('Unknown transport')
         history_id = assets.start_command(alias, button + (' + ' + combo + '+guide' if button == 'unpair' else ''),
-                                          'rf' if button in {'reset', 'unpair'} else force,
-                                          3000 if button == 'unpair' else 0 if button == 'reset' else delay)
+                                          'rf' if button in {'reset', 'allup', 'unpair'} else force,
+                                          3000 if button == 'unpair' else 0 if button in {'reset', 'allup'} else delay)
         started = time.monotonic()
         def finish(status, via, message):
             assets.finish_command(history_id, status, via, round((time.monotonic()-started)*1000), message)
@@ -266,8 +266,8 @@ def create_app(data_dir=None):
         try:
             if button == 'unpair':
                 result = ctl.unpair(alias, combo=combo)
-            elif button == 'reset':
-                result = ctl.dart(alias, 'reset', 'reset')
+            elif button in {'reset', 'allup'}:
+                result = ctl.dart(alias, button, button)
             else:
                 result = ctl.handle_auto_remote('1', alias, button, delay,
                     force=None if force == 'auto' else force)

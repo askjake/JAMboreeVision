@@ -24,7 +24,10 @@ function Invoke-Native([string]$Exe, [string[]]$Arguments) {
 function Wait-Healthy {
     $deadline = (Get-Date).AddSeconds(60)
     do {
-        if ((Get-Service JAMboreeVision).Status -ne 'Running') { throw 'Service stopped; inspect service logs' }
+        if ((Get-Service JAMboreeVision).Status -ne 'Running') {
+            Start-Sleep -Seconds 1
+            continue
+        }
         try {
             $s = Invoke-RestMethod "http://127.0.0.1:$Port/api/vision/state" -TimeoutSec 3
             if ($null -ne $s.stbs -and $null -ne $s.remotes) { return }

@@ -33,14 +33,35 @@ for(let n=1;n<=9;n++){const b=el('button',String(n));b.dataset.key=n;$('#numbers
 document.querySelectorAll('[data-key]').forEach(b=>b.onclick=run(async()=>{if(!active||busy)return;busy=true;renderActive();$('#command-status').textContent='Sending '+b.textContent+'…';try{const target=activeTarget();const route=target.direct?`/api/vision/settops/${encodeURIComponent(target.stb_alias)}/command`:`/api/vision/remotes/${target.id}/command`;const j=await api(route,'POST',{button:b.dataset.key,duration:Number($('#duration').value),transport:$('#transport').value,combo:$('#unpair-combo').value});$('#command-status').textContent=b.dataset.key==='unpair'?'RF unpair sequence sent; verify the remote is unpaired.':`Sent via ${j.via} · ${j.feedback||'Command completed'}`;}catch(e){$('#command-status').textContent=e.message;throw e;}finally{busy=false;renderActive();run(refreshHistory)();}}));
 async function toggleStream(id,on){if(on)selected.add(id);else selected.delete(id);localStorage.setItem('jv-selected',JSON.stringify([...selected]));renderChecks();await syncPlayers();}
 async function syncPlayers(){for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(!selected.has(id)||!s||p.source!==s.url||p.mode!==s.mode)await removePlayer(id);}for(const id of selected){if(!players.has(id)){const s=state.streams.find(s=>s.id===id);if(s)await addPlayer(s);}}for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(s)p.title.textContent=labelFor(s);}$('#video-count').textContent=players.size+' selected';$('#video-empty').style.display=players.size?'none':'block';}
-async function removePlayer(id){const p=players.get(id);if(!p)return;players.delete(id);p.dead=true;clearTimeout(p.retry);p.hls?.destroy();p.video.pause();p.video.removeAttribute('src');p.video.load();p.card.remove();try{await api(`/api/vision/streams/${id}/release`,'POST',{viewer});}catch{} }
-async function addPlayer(s){const card=el('article',undefined,'video-card'),head=el('div',undefined,'video-head'),title=el('strong',labelFor(s)),video=el('video'),status=el('div','Starting stream…','video-state');video.controls=true;video.muted=true;video.playsInline=true;head.append(title,button('Retry',()=>loadPlayer(s.id)),button('✕',()=>toggleStream(s.id,false)));card.append(head,video,status);$('#video-grid').append(card);const p={card,video,status,title,source:s.url,mode:s.mode,hls:null,retry:null,dead:false,loading:false};players.set(s.id,p);video.addEventListener('playing',()=>status.textContent='Live · audio starts muted');video.addEventListener('waiting',()=>status.textContent='Buffering…');await loadPlayer(s.id);}
-async function loadPlayer(id){const p=players.get(id);if(!p||p.loading)return;p.loading=true;clearTimeout(p.retry);p.hls?.destroy();p.hls=null;p.status.textContent='Connecting…';try{const j=await api(`/api/vision/streams/${id}/play`,'POST',{viewer});if(p.dead)return;p.url=j.url;
- const retry=()=>{if(!p.dead){p.status.textContent='Waiting for video — retrying…';clearTimeout(p.retry);p.retry=setTimeout(()=>loadPlayer(id),5000);}};
- if(globalThis.Hls?.isSupported()){const h=new Hls({liveSyncDurationCount:3,maxBufferLength:12});p.hls=h;h.loadSource(j.url);h.attachMedia(p.video);h.on(Hls.Events.MANIFEST_PARSED,()=>p.video.play().catch(()=>p.status.textContent='Press play to start'));h.on(Hls.Events.ERROR,(_,d)=>{if(d.fatal)retry();});}
- else if(p.video.canPlayType('application/vnd.apple.mpegurl')){p.video.src=j.url;p.video.onerror=retry;p.video.play().catch(()=>p.status.textContent='Press play to start');}
- else p.status.textContent='HLS playback unavailable. Use a modern browser.';
- }catch(e){if(!p.dead)p.status.textContent=e.message;}finally{p.loading=false;}}
+async function removePlayer(id){const p=players.get(id);if(!p)return;players.delete(id);p.dead=true;clearTimeout(p.retry);p.live?.destroy();p.hls?.destroy();p.video.pause();p.video.removeAttribute('src');p.video.load();p.card.remove();try{await api(`/api/vision/streams/${id}/release`,'POST',{viewer});}catch{} }
+async function addPlayer(s){
+ const card=el('article',undefined,'video-card'),head=el('div',undefined,'video-head'),title=el('strong',labelFor(s)),video=el('video'),status=el('div','Starting stream…','video-state');
+ video.controls=true;video.muted=true;video.playsInline=true;
+ const live=button('Go live',()=>players.get(s.id)?.live?.goLive(),'go-live');
+ live.title='Return to the latest available video and resume following live';
+ head.append(title,live,button('Retry',()=>loadPlayer(s.id)),button('✕',()=>toggleStream(s.id,false)));
+ card.append(head,video,status);$('#video-grid').append(card);
+ const p={card,video,status,title,source:s.url,mode:s.mode,hls:null,live:null,retry:null,dead:false,loading:false};players.set(s.id,p);await loadPlayer(s.id);
+}
+async function loadPlayer(id){
+ const p=players.get(id);if(!p||p.loading)return;p.loading=true;clearTimeout(p.retry);
+ const saved=p.live?.snapshot();p.live?.destroy();p.hls?.destroy();p.hls=null;
+ p.video.onerror=null;p.video.pause();p.video.removeAttribute('src');p.video.load();
+ p.live=createLivePlayback(p.video,{saved,getHls:()=>p.hls,onStatus:({kind,text})=>{if(!p.dead){p.status.dataset.playback=kind;p.status.textContent=text;}}});
+ p.status.dataset.playback='connecting';p.status.textContent='Connecting…';
+ try{const j=await api(`/api/vision/streams/${id}/play`,'POST',{viewer});if(p.dead)return;p.url=j.url;
+ const retry=()=>{if(!p.dead){p.live.destroy();p.status.dataset.playback='buffering';p.status.textContent='Waiting for video — retrying…';clearTimeout(p.retry);p.retry=setTimeout(()=>loadPlayer(id),5000);}};
+ if(globalThis.Hls?.isSupported()){
+  const h=new Hls({liveSyncDurationCount:3,maxBufferLength:12,maxLiveSyncPlaybackRate:1});p.hls=h;
+  h.on(Hls.Events.MANIFEST_PARSED,()=>p.live.start());
+  h.on(Hls.Events.LEVEL_UPDATED,()=>p.live.update());
+  h.on(Hls.Events.ERROR,(_,d)=>{if(d.fatal)retry();});
+  h.loadSource(j.url);h.attachMedia(p.video);
+ }else if(p.video.canPlayType('application/vnd.apple.mpegurl')){
+  p.video.src=j.url;p.video.onerror=retry;p.live.start();
+ }else {p.live.destroy();p.status.textContent='HLS playback unavailable. Use a modern browser.';}
+ }catch(e){p.live.destroy();if(!p.dead){p.status.dataset.playback='error';p.status.textContent=e.message;}}finally{p.loading=false;}
+}
 setInterval(async()=>{for(const [id,p] of players){try{const j=await api(`/api/vision/streams/${id}/play`,'POST',{viewer});if(!p.dead&&p.url&&j.url!==p.url)await loadPlayer(id);}catch(e){p.status.textContent=e.message;}}},20000);
 window.addEventListener('pagehide',()=>{for(const id of players.keys())navigator.sendBeacon(`/api/vision/streams/${id}/release`,new Blob([JSON.stringify({viewer})],{type:'application/json'}));});
 function renderAssets(){const st=$('#stb-table');st.replaceChildren();for(const [alias,s] of Object.entries(state.stbs)){const tr=el('tr');tr.append(td(detail(alias,s.stb||'No receiver ID')),td(detail(s.ip||'—',s.mac||'MAC learned after verified SGS success')),td(detail(s.protocol,`DART ${s.remote||'—'} · ${s.com_port||'no COM'}`)),td(s.role==='joey'?'Joey → '+s.host:'Hopper / standalone'),td(button('Control',()=>{const target=controlTargets().find(r=>r.stb_alias===alias);selectTarget(target.id);tab('console');}),button('Edit',()=>editStb(alias)),button('Pair',()=>pair(alias)),button('Status',async()=>notice(JSON.stringify(await api('/api/transports/'+encodeURIComponent(alias))))),button('Recover IP',async()=>{await api('/api/ip_recovery/run','POST',{alias});notice('IP recovery started');}),button('Delete',async()=>{if(confirm('Delete settop '+alias+'?')){await api('/api/vision/settops/'+encodeURIComponent(alias),'DELETE');await refresh();}},'danger')));st.append(tr);}

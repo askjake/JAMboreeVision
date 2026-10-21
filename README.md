@@ -294,3 +294,42 @@ installation without Git, explicit Python/FFmpeg paths, LocalService identity,
 configuration migration, department-subnet firewall rule, rotating serial logs,
 automatic startup/recovery, staged updates, and code rollback. Clients need only
 a browser. Native Windows service/hardware acceptance is required before rollout.
+
+
+## Live playback and DART recovery controls
+
+Each new video window starts near the latest available HLS video and follows
+that moving edge. A **Go live** button returns a paused/delayed viewer to the
+latest available video and resumes playback. Seeking backward or pausing using
+the native video controls disables automatic catch-up for that window. Other
+windows keep their own playback choices. Automatically reconnecting a player
+preserves delayed/paused intent and restores the closest available position if
+the old position has expired from the live window. Closing and reopening a video
+window starts in live-following mode again.
+
+The status below the video distinguishes **Live**, **Delayed**, **Paused**, and
+**Buffering**. The seconds shown measure distance from the player's available
+stream edge, not the STB's capture time. HLS uses a safety buffer (typically
+several seconds), and an upstream source can itself be delayed. A video that
+appears unchanged is not evidence that the remote command failed: click Go live
+and confirm the correct stream/settop association before diagnosing RF delivery.
+Muted autoplay is used; browsers can still require a manual Play gesture.
+
+**DART power reset (99)** uses the existing reset path and sends
+`<configured channel> 99 reset`. **Release all buttons (86)** sends
+`<configured channel> 86 allup`. These use the selected settop's configured
+COM port/channel regardless of the SGS/RF transport selector and work without
+video. They are different from the normal remote Power key. In the supplied
+16-remote DART sketch, reset pulses a shared reset pin; firmware/hardware decide
+which remote circuits reset. These commands do not establish that the STB
+accepted an RF command or power-cycle the STB itself. Board firmware variants
+must be checked on hardware.
+
+The service installer now polls startup transitions through the HTTP-readiness
+deadline, fixing the premature "Service stopped" report seen during the initial
+Windows deployment. No data migration is needed for these changes.
+
+Player regression checks: `npm run test:player` (Node 22+), `npm run test:dom`
+(after `npm install`), and the optional real-browser acceptance flow
+`npm run test:browser`. The Python suite checks exact DART wire output and history
+for direct settop and remote-profile routes, including forced SGS selection.

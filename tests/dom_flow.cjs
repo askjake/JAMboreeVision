@@ -4,6 +4,7 @@ try{cfg=await new Promise((resolve,reject)=>{let b='';fixture.stdout.on('data',d
 const html=fs.readFileSync('vision/static/index.html','utf8');dom=new JSDOM(html,{url:cfg.url,runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window,d=w.document;
 let fixturePorts=[{device:'/dev/jv-test-only',description:'Fixture USB'}];
 w.fetch=(p,o)=>String(p).endsWith('/serial-ports')?Promise.resolve({ok:true,json:async()=>({ok:true,ports:fixturePorts})}):fetch(new URL(p,cfg.url),o);w.confirm=()=>true;w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false};w.HTMLMediaElement.prototype.play=()=>Promise.resolve();w.HTMLMediaElement.prototype.pause=function(){};w.HTMLMediaElement.prototype.load=function(){};w.Hls={isSupported:()=>false};
+w.eval(fs.readFileSync('vision/static/live-player.js','utf8'));
 w.eval(fs.readFileSync('vision/static/app.js','utf8'));
 async function wait(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,30))}throw Error('DOM wait timeout')}
 function fill(k,v){d.querySelector('#editor-fields [name="'+k+'"]').value=v}
@@ -28,7 +29,7 @@ w.fetch=async(p,o)=>{
  if(String(p).endsWith('/command')){addedCommands.push(JSON.parse(o.body));return {ok:true,json:async()=>({ok:true,via:'dart'})};}
  return actualFetch(p,o);
 };
-for(const key of ['sat','tv','aux','input','mic','reset','unpair']){
+for(const key of ['sat','tv','aux','input','mic','reset','allup','unpair']){
  const b=d.querySelector('[data-key="'+key+'"]');assert.ok(b);assert.equal(b.disabled,false);
  b.click();await wait(()=>!b.disabled);assert.equal(addedCommands.at(-1).button,key);
 }
@@ -36,7 +37,7 @@ assert.equal(addedCommands.at(-1).combo,'dvr');
 d.querySelector('#unpair-combo').value='home';d.querySelector('[data-key=unpair]').click();
 await wait(()=>!d.querySelector('[data-key=unpair]').disabled);assert.equal(addedCommands.at(-1).combo,'home');
 w.fetch=actualFetch;
-console.log('PASS: SAT, TV, AUX, INPUT, reset and both unpair choices dispatch without video');
+console.log('PASS: SAT, TV, AUX, INPUT, power reset, release all and both unpair choices dispatch without video');
 // Create and operate a remote before any stream exists.
 d.querySelector('#new-remote').click();fill('name','DOM Remote');fill('stb_alias','DOM Hopper');
 assert.ok(d.querySelector('[aria-label="Available host serial ports"]'));assert.equal(d.querySelector('[name=remote]').value,'1');
@@ -61,7 +62,7 @@ w.fetch=normalFetch;
 console.log('PASS: direct settop control, command during hung video, command after video failure with link retained');
 
 const j=await(await fetch(cfg.url+'/_test/commands')).json();assert.equal(j.commands[0].args[1],'DOM Hopper');assert.equal(j.commands[0].args[2],'guide');
-assert.equal(d.querySelector('.video-head strong').textContent,'DOM Remote-stream');assert.equal(d.querySelector('#toast').className,'');await wait(()=>d.querySelector('#video-count').textContent==='1 selected');console.log('PASS: DOM UI bootstrap, settop/stream/remote forms, persistent links, selected video window, command dispatch');
+assert.equal(d.querySelector('.video-head strong').textContent,'DOM Remote-stream');assert.equal(d.querySelector('.go-live').textContent,'Go live');assert.equal(d.querySelector('#toast').className,'');await wait(()=>d.querySelector('#video-count').textContent==='1 selected');console.log('PASS: DOM UI bootstrap, settop/stream/remote forms, persistent links, selected video window, command dispatch');
 
 const picker=d.querySelector('#config-file');let pickerClicked=false;picker.click=()=>{pickerClicked=true};d.querySelector('#import-config').click();assert.equal(pickerClicked,true);
 const config=JSON.stringify({stbs:{'Imported Hopper':{protocol:'SGS',ip:'192.0.2.1'}}});

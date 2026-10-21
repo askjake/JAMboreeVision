@@ -240,3 +240,24 @@ dependencies. If configuration was meant to be imported and has not yet been
 copied, include the same `-ImportDataDirectory` option as the original install.
 The native file-ACL regression is included in the Windows CI job; host service
 acceptance remains required.
+
+
+### Updating for live-edge playback and DART recovery controls
+
+Download the current `montjac` ZIP, extract it into a new source folder, and
+use that source folder's `deploy/windows/Manage-Service.ps1` for Update. This
+includes the startup-readiness polling correction. The source folder must be
+the one containing `vision` and `requirements.txt`. In elevated PowerShell:
+
+```powershell
+$source = 'C:\Install\JAMboreeVision-montjac'
+Unblock-File -LiteralPath "$source\deploy\windows\Manage-Service.ps1"
+& "$source\deploy\windows\Manage-Service.ps1" -Action Update -SourceDirectory $source
+```
+
+The existing installation record supplies Python, FFmpeg and port settings.
+Update prepares a release, stops the service, backs up shared configuration,
+starts the new release, and checks HTTP readiness. Existing stream/settop/remote
+assets remain in the shared data directory. An update interrupts current video
+sessions; hard-refresh each browser afterward (Ctrl+F5 on Windows). Verify Go live,
+pause/seek preservation, and the DART controls on the intended hardware.

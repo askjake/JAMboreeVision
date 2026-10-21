@@ -23,6 +23,15 @@ const os=require('node:os'),path=require('node:path');
  await page.locator('#editor-form button[type="submit"]').click();await page.locator('#editor').waitFor({state:'hidden'});
  await page.locator('[data-tab="console"]').click();await page.locator('#watch-linked').click();
  await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v.currentTime>0&&v.videoWidth>0;},{},{timeout:45000});
+ // Native pause must stay paused; Go live must resume near the moving HLS edge.
+ await page.evaluate(()=>document.querySelector('video').pause());
+ await page.waitForFunction(()=>document.querySelector('.video-state').textContent.startsWith('Paused'));
+ const pausedAt=await page.locator('video').evaluate(v=>v.currentTime);
+ await page.waitForTimeout(1400);
+ assert.ok(Math.abs(await page.locator('video').evaluate(v=>v.currentTime)-pausedAt)<.2);
+ await page.locator('.go-live').click();
+ await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&!v.paused&&v.seekable.length&&v.seekable.end(v.seekable.length-1)-v.currentTime<10;},{},{timeout:15000});
+ await page.waitForFunction(()=>document.querySelector('.video-state').dataset.playback==='live');
  await page.locator('[data-key="guide"]').click();await page.waitForFunction(()=>document.querySelector('#command-status').textContent.includes('sgs_fixture'));
  const captured=await (await page.request.get(config.url+'/_test/commands')).json();assert.equal(captured.commands[0].args[1],'Bench Hopper');assert.equal(captured.commands[0].args[2],'guide');
  let state=await (await page.request.get(config.url+'/api/vision/state')).json();assert.equal(state.remotes[0].stream_alias,'Bench Remote-stream');
@@ -37,6 +46,6 @@ const os=require('node:os'),path=require('node:path');
  const resolved=await(await page.request.get(config.url+'/api/vision/resolve/Renamed%20Remote-stream')).json();assert.equal(resolved.stream.name,'Bench video');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#remote-table').textContent.includes('Renamed Remote'));
  await page.setViewportSize({width:390,height:844});await page.locator('[data-tab="console"]').click();await page.screenshot({path:path.join(os.tmpdir(),'jv-mobile.png'),fullPage:true});
- assert.deepEqual(errors,[]);console.log('PASS: browser CRUD, stream links, actual HLS playback, remote dispatch, shared viewers, rename, reload, mobile layout.');
+ assert.deepEqual(errors,[]);console.log('PASS: browser CRUD, stream links, actual HLS playback, pause preservation, Go live, remote dispatch, shared viewers, rename, reload, mobile layout.');
  }finally{if(browser)await browser.close();if(config){try{await fetch(config.url+'/_test/shutdown',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch{fixture.kill('SIGTERM');}}else fixture.kill('SIGTERM');}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -317,3 +317,25 @@ def test_mic_backend_rf_wire_mapping(client, monkeypatch):
     assert lines == [('H', '1 97 17 3000\n')]
     assert get_sgs_codes('mic', 120) == 'Mic'
     assert get_sgs_codes('mic', 3000) == 'Mic'
+
+@pytest.mark.parametrize('key,number', [('reset',99),('allup',86)])
+@pytest.mark.parametrize('profile', [False, True])
+def test_dart_management_wire_and_history(client, monkeypatch, key, number, profile):
+    import jamboree.app as legacy
+    import jamboree.serial_bridge as bridge
+    _, remote = seed(client)
+    legacy.store.update_stb('H', {'remote':'2'})
+    # No linked video and a forced SGS selection must still dispatch through DART.
+    client.delete('/api/vision/streams/'+remote['stream_id'], json={})
+    lines=[]
+    monkeypatch.setattr(bridge, '_write', lambda alias,line: lines.append((alias,line)) or line.rstrip())
+    sgs=Mock(side_effect=AssertionError('management command used SGS'))
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',sgs)
+    route = f"/api/vision/remotes/{remote['id']}/command" if profile else '/api/vision/settops/H/command'
+    response=client.post(route,json={'button':key,'transport':'sgs','duration':3000})
+    assert response.status_code==200 and response.json['via']=='dart'
+    assert lines==[('H',f'2 {number} {key}\n')]
+    sgs.assert_not_called()
+    row=client.get('/api/vision/commands?alias=H').json['commands'][0]
+    assert row['button']==key and row['transport']=='rf' and row['duration']==0
+    assert row['status']=='sent' and 'not confirmed' in row['message']

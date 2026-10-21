@@ -17,4 +17,14 @@ jobs:
       - name: Windows service file ACL regression
         if: runner.os == 'Windows'
         shell: powershell
-        run: .\tests\windows_service_acl.ps1
+        run: |
+          .\tests\windows_service_acl.ps1
+          .\tests\windows_service_health.ps1
+  player:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/live_player.cjs

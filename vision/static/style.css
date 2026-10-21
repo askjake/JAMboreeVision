@@ -5,3 +5,5 @@
 #command-history tr[data-status="rejected"] td:nth-child(5),#command-history tr[data-status="interrupted"] td:nth-child(5){color:#fcd34d}
 #command-history tr[data-status="running"] td:nth-child(5){color:#7dd3fc}
 #history-all{width:auto}
+
+.video-head{flex-wrap:wrap}.video-head strong{flex:1 1 130px}.video-state[data-playback=live]{color:var(--accent)}.video-state[data-playback=delayed],.video-state[data-playback=paused]{color:#f0c37b}
