@@ -11,3 +11,5 @@
 .video-card.remote-active{border-color:var(--accent);box-shadow:0 0 0 2px #63dfbe44}.video-card:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.video-targets{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px}.video-targets button{padding:4px 8px;font-size:11px}.video-targets .active{color:var(--accent);border-color:var(--accent);background:#203d3a}
 
 .video-control{max-width:100%;overflow-wrap:anywhere;text-align:left}
+
+.target-row{display:flex;align-items:center;gap:7px}.target-row>input{width:18px;height:18px;flex-shrink:0}.target-row .remote-item{margin-bottom:6px}.multi-toggle{display:flex;align-items:center;gap:8px;margin:12px 0}.multi-toggle input{width:18px;height:18px}#multi-actions[hidden]{display:none}#batch-results p{overflow-wrap:anywhere}#active-remote-detail{overflow-wrap:anywhere}

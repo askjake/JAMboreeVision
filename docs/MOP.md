@@ -980,3 +980,49 @@ stream with no linked remote leaves the current target unchanged and is labeled
 **Video only · no remote linked**. Go live, Retry and Close remain independent
 player controls. Editing remote/stream links and refreshing inventory updates the
 choices and outlines on existing windows without reloading playback.
+
+
+## Control multiple settops
+
+In Remote console, enable **Control multiple settops**. The current target is
+initially selected. Use the checkboxes beside remotes to add/remove targets;
+**Select visible** adds targets matching the current remote-search filter and
+**Clear selection** removes them all. The header lists the actual selected settop
+aliases. A maximum of 32 distinct settops can be selected. Multiple profiles for
+the same settop alias are one command destination.
+
+Each remote button applies once to each selected settop, including the selected
+transport, hold duration, and RF unpair combination. Stream links remain optional.
+An empty group disables command buttons. In group mode, clicking a uniquely
+linked video or a named Control button adds its settop to the group and focuses
+that remote; it does not replace the other selections. All streams linked to
+selected settops receive outlines. **Watch selected streams** opens their linked
+videos. Use the Assets tab or single-target mode to edit individual stream links.
+
+Group membership is per browser page and resets to single-target mode on reload.
+Turning group mode off returns to the focused remote. Selecting video windows
+and selecting command targets are separate operations: video-only/unlinked
+streams never become command destinations. Shared-stream ambiguity still uses
+explicit named Control buttons.
+
+A command snapshots the selected aliases when clicked. Results list Sent/Failed
+and feedback separately for each settop; one failure does not cancel other targets.
+History defaults to the selected group's latest 100 entries, while **All settops**
+retains its existing meaning. Successful serial writes still do not prove receiver
+action. A response/connection failure can leave delivery uncertain; inspect history
+and the receivers before manually resending.
+
+The batch endpoint is `POST /api/vision/commands/batch`, with `aliases` containing
+1-32 settop aliases plus the existing `button`, `duration`, `transport`, and `combo`
+fields. Every alias/command is validated before any command is sent. Case variants
+and duplicate aliases collapse to one target. Results preserve target order and
+include individual history IDs. An accepted batch returns `ok: true` with `sent`,
+`failed`, and `results`; callers must inspect individual results for partial failure.
+
+Up to eight independent connection groups dispatch concurrently. Commands that
+can use the same configured DART port run sequentially, including complete
+holds/unpair chords, to avoid interleaving hardware sequences. This is concurrent
+best-effort control, not synchronized/frame-accurate receiver execution. Another
+console command/batch is rejected while a batch is running, preserving the existing
+command exclusion contract. Selection and playback remain usable during dispatch.
+No database schema migration is needed.

@@ -1,5 +1,6 @@
 """One same-origin app; the existing SGS/DART controller remains authoritative."""
 import atexit
+from concurrent.futures import ThreadPoolExecutor
 import os
 import shutil
 import sqlite3
@@ -143,7 +144,10 @@ def create_app(data_dir=None):
 
     @app.get('/api/vision/commands')
     def command_history():
-        return jsonify(ok=True, commands=assets.history(request.args.get('alias')))
+        aliases = request.args.getlist('alias')
+        if len(aliases)>32:
+            raise ValueError('Filter at most 32 settops')
+        return jsonify(ok=True, commands=assets.history(aliases=aliases) if aliases else assets.history())
 
     @app.get('/api/vision/state')
     def state():
@@ -238,10 +242,7 @@ def create_app(data_dir=None):
             raise KeyError('Settop not found')
         return dispatch_command(canonical)
 
-    def dispatch_command(alias):
-        # Device control depends only on the configured settop transport.
-        # Never probe, acquire, or check video here.
-        data = body()
+    def command_parameters(data):
         button = str(data.get('button', '')).lower()
         if button not in button_id_to_number and button != 'unpair':
             raise ValueError('Unknown remote button')
@@ -254,15 +255,23 @@ def create_app(data_dir=None):
         force = data.get('transport', 'auto')
         if force not in {'auto', 'sgs', 'rf'}:
             raise ValueError('Unknown transport')
+        return button, combo, delay, force
+
+    def dispatch_command(alias):
+        result, code = execute_command(alias, command_parameters(body()))
+        return jsonify(result), code
+
+    def execute_command(alias, parameters, locked=False):
+        button, combo, delay, force = parameters
         history_id = assets.start_command(alias, button + (' + ' + combo + '+guide' if button == 'unpair' else ''),
                                           'rf' if button in {'reset', 'allup', 'unpair'} else force,
                                           3000 if button == 'unpair' else 0 if button in {'reset', 'allup'} else delay)
         started = time.monotonic()
         def finish(status, via, message):
             assets.finish_command(history_id, status, via, round((time.monotonic()-started)*1000), message)
-        if not command_lock.acquire(blocking=False):
+        if not locked and not command_lock.acquire(blocking=False):
             finish('rejected', None, 'Another remote command is still running; nothing sent')
-            return jsonify(ok=False, error='A remote command is still running'), 409
+            return {'ok':False,'error':'A remote command is still running','history_id':history_id},409
         try:
             if button == 'unpair':
                 result = ctl.unpair(alias, combo=combo)
@@ -277,12 +286,64 @@ def create_app(data_dir=None):
             message = ('Serial write completed; receiver action not confirmed' if serial else
                        'SGS command completed; verify receiver action') if ok else 'Controller reported command failure'
             finish('sent' if ok else 'failed', via, message)
-            return jsonify({**result, 'history_id': history_id, 'feedback': message})
+            return {**result, 'history_id': history_id, 'feedback': message},200
         except Exception as exc:
             finish('failed', None, 'Command failed (' + type(exc).__name__ + '); check transport and server log')
             if isinstance(exc, RuntimeError):
-                return jsonify(ok=False, error=str(exc)), 503
-            raise
+                return {'ok':False,'error':str(exc),'history_id':history_id},503
+            if isinstance(exc, (ValueError, KeyError)):
+                return {'ok':False,'error':str(exc),'history_id':history_id},400
+            return {'ok':False,'error':'Command failed; check server logs','history_id':history_id},500
+        finally:
+            if not locked:
+                command_lock.release()
+
+    @app.post('/api/vision/commands/batch')
+    def batch_command():
+        data = body()
+        parameters = command_parameters(data)
+        requested = data.get('aliases')
+        if not isinstance(requested, list) or not 1 <= len(requested) <= 32 or any(not isinstance(a,str) for a in requested):
+            raise ValueError('Select between 1 and 32 settop aliases')
+        # Validate every target before sending anything; multiple profiles/case variants
+        # of one settop must not cause duplicate button presses.
+        aliases = []
+        with asset_lock:
+            for requested_alias in requested:
+                alias = store.resolve_alias(requested_alias)
+                if not alias:
+                    raise ValueError('Settop not found: ' + requested_alias)
+                if alias not in aliases:
+                    aliases.append(alias)
+            entries = {alias:dict(store.get(alias)) for alias in aliases}
+        if not command_lock.acquire(blocking=False):
+            return jsonify(ok=False,error='A remote command is still running; no batch commands sent'),409
+        try:
+            groups = {}
+            for alias, entry in entries.items():
+                port = str(entry.get('com_port') or '').strip().casefold()
+                uses_dart = parameters[0] in {'reset','allup','unpair'} or parameters[3] != 'sgs'
+                key = ('port',port) if uses_dart and port else ('alias',alias)
+                groups.setdefault(key,[]).append(alias)
+            def work(alias):
+                try:
+                    result, code = execute_command(alias, parameters, locked=True)
+                    return {k:v for k,v in {
+                        'alias':alias,'ok':bool(result.get('ok',True)) and code==200,
+                        'status':'sent' if result.get('ok',True) and code==200 else 'failed',
+                        'via':result.get('via'),'feedback':result.get('feedback'),
+                        'error':result.get('error') or ('Controller reported command failure' if not result.get('ok',True) else None),'history_id':result.get('history_id')
+                    }.items() if v is not None}
+                except Exception:
+                    app.logger.exception('Batch command processing failed for %s', alias)
+                    return {'alias':alias,'ok':False,'status':'failed','error':'Processing failed; delivery uncertain, inspect server logs'}
+            def work_group(group):
+                # A DART port owns a complete hold/chord before the next channel.
+                return [work(alias) for alias in group]
+            with ThreadPoolExecutor(max_workers=min(8,len(groups))) as pool:
+                by_alias = {r['alias']:r for group in pool.map(work_group,groups.values()) for r in group}
+            results = [by_alias[alias] for alias in aliases]
+            return jsonify(ok=True,results=results,sent=sum(r['ok'] for r in results),failed=sum(not r['ok'] for r in results))
         finally:
             command_lock.release()
 

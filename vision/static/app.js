@@ -1,9 +1,11 @@
 'use strict';
 const $=s=>document.querySelector(s), el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 let state={stbs:{},remotes:[],streams:[]}, active=null, busy=false, pairAlias=null, editorSave=null;
+let multiControl=false;const selectedTargets=new Set();
+function commandAliases(){return multiControl?[...selectedTargets].filter(a=>state.stbs[a]):(activeTarget()&&!activeTarget().missing_settop?[activeTarget().stb_alias]:[]);}
 function controlTargets(){return [...state.remotes,...Object.keys(state.stbs).filter(alias=>!state.remotes.some(r=>r.stb_alias===alias)).map(alias=>({id:'settop:'+alias,name:alias,stb_alias:alias,stream_id:null,direct:true}))];}
 function activeTarget(){return controlTargets().find(r=>r.id===active);}
-function selectTarget(id){active=id;renderRemotes();renderActive();run(refreshHistory)();}
+function selectTarget(id){const target=controlTargets().find(r=>r.id===id);if(!target||target.missing_settop)return;if(multiControl&&!selectedTargets.has(target.stb_alias)){if(selectedTargets.size>=32){notice('Select at most 32 settops',true);return;}selectedTargets.add(target.stb_alias);}active=id;renderRemotes();renderActive();run(refreshHistory)();}
 const players=new Map(), viewer=(globalThis.crypto?.randomUUID?.() || 'viewer-'+Date.now()+'-'+Math.random().toString(36).slice(2));
 let selected=new Set(JSON.parse(localStorage.getItem('jv-selected')||'[]')), toastTimer;
 async function api(path,method='GET',data){const r=await fetch(path,{method,headers:method==='GET'?{}:{'Content-Type':'application/json'},body:method==='GET'?undefined:JSON.stringify(data||{})});const j=await r.json();if(!r.ok||j.ok===false)throw Error(j.error||j.message||'Request failed');return j;}
@@ -17,27 +19,63 @@ function tab(id){document.querySelectorAll('.tab').forEach(n=>n.classList.toggle
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function td(...nodes){const c=el('td');for(const n of nodes)c.append(typeof n==='string'?document.createTextNode(n):n);return c;}
 function detail(a,b){const d=el('div');d.append(el('strong',a),el('small',b));return d;}
-async function refresh(){state=await api('/api/vision/state');if(!controlTargets().some(r=>r.id===active))active=controlTargets()[0]?.id||null;selected=new Set([...selected].filter(id=>state.streams.some(s=>s.id===id)));render();run(refreshHistory)();await syncPlayers();}
+async function refresh(){state=await api('/api/vision/state');for(const alias of selectedTargets)if(!state.stbs[alias])selectedTargets.delete(alias);if(!controlTargets().some(r=>r.id===active))active=controlTargets()[0]?.id||null;selected=new Set([...selected].filter(id=>state.streams.some(s=>s.id===id)));render();run(refreshHistory)();await syncPlayers();}
 function render(){
  $('#system-status').textContent=`${state.remotes.length} remotes · ${state.streams.length} streams · ${state.ffmpeg?'FFmpeg ready':'Install FFmpeg for video'}`;
  $('#remote-count').textContent=controlTargets().length;renderRemotes();renderChecks();renderActive();renderAssets();renderStreams();renderScan(state.discovery);
 }
-function renderRemotes(){const list=$('#remote-list');list.replaceChildren();const q=$('#remote-search').value.toLowerCase();for(const r of controlTargets().filter(r=>r.name.toLowerCase().includes(q))){const b=button('',()=>{selectTarget(r.id);},'remote-item'+(active===r.id?' active':''));b.append(el('strong',r.name),el('small',r.stb_alias+(r.stream_id?' · video linked':'')));list.append(b);}if(!controlTargets().length)list.append(el('p','Add or import a settop in Settops & remotes to enable control.','muted'));}
+function renderRemotes(){
+ const list=$('#remote-list');list.replaceChildren();const q=$('#remote-search').value.toLowerCase();
+ for(const r of controlTargets().filter(r=>r.name.toLowerCase().includes(q))){
+  const b=button('',()=>selectTarget(r.id),'remote-item'+(active===r.id?' active':''));b.append(el('strong',r.name),el('small',r.stb_alias+(r.stream_id?' · video linked':'')));
+  if(multiControl){const row=el('div',undefined,'target-row'),check=el('input');check.type='checkbox';check.checked=selectedTargets.has(r.stb_alias);check.disabled=!!r.missing_settop;check.setAttribute('aria-label','Control '+r.name);check.dataset.alias=r.stb_alias;
+   check.onchange=()=>{if(check.checked){if(selectedTargets.size>=32){check.checked=false;notice('Select at most 32 settops',true);return;}selectedTargets.add(r.stb_alias);}else selectedTargets.delete(r.stb_alias);renderRemotes();renderActive();run(refreshHistory)();};row.append(check,b);list.append(row);
+  }else list.append(b);
+ }
+ if(!controlTargets().length)list.append(el('p','Add or import a settop in Settops & remotes to enable control.','muted'));
+ $('#multi-actions').hidden=!multiControl;
+ $('#target-summary').textContent=multiControl?commandAliases().length+' settops selected · every key applies to this group':'Single-target control';
+}
+$('#multi-control').onchange=()=>{multiControl=$('#multi-control').checked;selectedTargets.clear();if(multiControl&&activeTarget()&&!activeTarget().missing_settop)selectedTargets.add(activeTarget().stb_alias);$('#batch-results').replaceChildren();renderRemotes();renderActive();run(refreshHistory)();};
+$('#clear-targets').onclick=()=>{selectedTargets.clear();renderRemotes();renderActive();run(refreshHistory)();};
+$('#select-visible-targets').onclick=()=>{const q=$('#remote-search').value.toLowerCase();for(const r of controlTargets().filter(r=>!r.missing_settop&&r.name.toLowerCase().includes(q))){if(selectedTargets.size>=32)break;selectedTargets.add(r.stb_alias);}renderRemotes();renderActive();run(refreshHistory)();};
 function renderChecks(){const box=$('#stream-checks');box.replaceChildren();for(const s of state.streams){const l=el('label',undefined,'stream-check'),c=el('input');c.type='checkbox';c.checked=selected.has(s.id);c.onchange=run(()=>toggleStream(s.id,c.checked));const title=el('span',labelFor(s));title.append(el('small',s.name));l.append(c,title);box.append(l);}if(!state.streams.length)box.append(el('p','Add or discover streams in the Streams tab.','muted'));}
-function renderActive(){const r=activeTarget();$('#active-remote-name').textContent=r?.name||'Select a remote';$('#active-remote-detail').textContent=r?(r.missing_settop?'Settop missing — edit this remote':`${r.stb_alias} · ${state.stbs[r.stb_alias]?.protocol||''}`):'Add a settop to begin; video is optional.';streamOptions($('#console-link'),r?.stream_id);$('#console-link').disabled=!r;$('#watch-linked').disabled=!r?.stream_id;document.querySelectorAll('[data-key]').forEach(b=>b.disabled=!r||r.missing_settop||busy);renderVideoTargets();}
+function renderActive(){
+ const r=activeTarget(),aliases=commandAliases();
+ $('#active-remote-name').textContent=multiControl?aliases.length+' settops selected':r?.name||'Select a remote';
+ $('#active-remote-detail').textContent=multiControl?(aliases.join(' · ')||'Select target checkboxes to enable group control.'):(r?(r.missing_settop?'Settop missing — edit this remote':`${r.stb_alias} · ${state.stbs[r.stb_alias]?.protocol||''}`):'Add a settop to begin; video is optional.');
+ streamOptions($('#console-link'),r?.stream_id);$('#console-link').disabled=!r||multiControl;
+ const linked=multiControl?controlTargets().some(t=>aliases.includes(t.stb_alias)&&t.stream_id):!!r?.stream_id;
+ $('#watch-linked').disabled=!linked;$('#watch-linked').textContent=multiControl?'Watch selected streams':'Watch linked stream';
+ document.querySelectorAll('[data-key]').forEach(b=>b.disabled=!aliases.length||busy);renderVideoTargets();
+}
 async function linkRemote(r,id){const result=await api('/api/vision/remotes'+(r.direct?'':'/'+r.id),r.direct?'POST':'PUT',{name:r.name,stb_alias:r.stb_alias,stream_id:id});if(r.direct)active=result.remote.id;await refresh();notice('Stream link saved');}
 $('#console-link').onchange=run(()=>linkRemote(activeTarget(),$('#console-link').value));
-$('#watch-linked').onclick=run(()=>toggleStream(activeTarget().stream_id,true));
+$('#watch-linked').onclick=run(async()=>{const ids=multiControl?[...new Set(controlTargets().filter(r=>commandAliases().includes(r.stb_alias)&&r.stream_id).map(r=>r.stream_id))]:[activeTarget().stream_id];for(const id of ids)await toggleStream(id,true);});
 $('#remote-search').oninput=renderRemotes;$('#refresh').onclick=run(refresh);
 for(let n=1;n<=9;n++){const b=el('button',String(n));b.dataset.key=n;$('#numbers').append(b);}
-document.querySelectorAll('[data-key]').forEach(b=>b.onclick=run(async()=>{if(!active||busy)return;const target=activeTarget();busy=true;renderActive();$('#command-status').textContent='Sending '+b.textContent+' to '+target.name+'…';try{const route=target.direct?`/api/vision/settops/${encodeURIComponent(target.stb_alias)}/command`:`/api/vision/remotes/${target.id}/command`;const j=await api(route,'POST',{button:b.dataset.key,duration:Number($('#duration').value),transport:$('#transport').value,combo:$('#unpair-combo').value});$('#command-status').textContent=b.dataset.key==='unpair'?target.name+': RF unpair sequence sent; verify the remote is unpaired.':`${target.name}: sent via ${j.via} · ${j.feedback||'Command completed'}`;}catch(e){$('#command-status').textContent=e.message;throw e;}finally{busy=false;renderActive();run(refreshHistory)();}}));
+document.querySelectorAll('[data-key]').forEach(b=>b.onclick=run(async()=>{
+ const aliases=commandAliases(),batch=multiControl,target=activeTarget();if(!aliases.length||busy)return;
+ const data={button:b.dataset.key,duration:Number($('#duration').value),transport:$('#transport').value,combo:$('#unpair-combo').value};
+ busy=true;renderActive();$('#batch-results').replaceChildren();$('#command-status').textContent='Sending '+b.textContent+' to '+aliases.join(', ')+'…';
+ try{
+  if(batch){
+   const j=await api('/api/vision/commands/batch','POST',{...data,aliases});
+   $('#command-status').textContent=`${j.sent} sent · ${j.failed} failed · ${b.textContent}`;
+   for(const r of j.results){const row=el('p',r.alias+': '+(r.ok?'Sent via '+r.via+' · '+r.feedback:'Failed · '+r.error),r.ok?'muted':'error');row.dataset.alias=r.alias;row.dataset.status=r.status;$('#batch-results').append(row);}
+  }else{
+   const route=target.direct?`/api/vision/settops/${encodeURIComponent(target.stb_alias)}/command`:`/api/vision/remotes/${target.id}/command`;
+   const j=await api(route,'POST',data);$('#command-status').textContent=b.dataset.key==='unpair'?target.name+': RF unpair sequence sent; verify the remote is unpaired.':`${target.name}: sent via ${j.via} · ${j.feedback||'Command completed'}`;
+  }
+ }catch(e){$('#command-status').textContent=e.message;throw e;}finally{busy=false;renderActive();run(refreshHistory)();}
+}));
 async function toggleStream(id,on){if(on){selected.add(id);selectVideoRemote(id);}else selected.delete(id);localStorage.setItem('jv-selected',JSON.stringify([...selected]));renderChecks();await syncPlayers();}
 async function syncPlayers(){for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(!selected.has(id)||!s||p.source!==s.url||p.mode!==s.mode)await removePlayer(id);}for(const id of selected){if(!players.has(id)){const s=state.streams.find(s=>s.id===id);if(s)await addPlayer(s);}}for(const [id,p] of players){const s=state.streams.find(s=>s.id===id);if(s)p.title.textContent=labelFor(s);}renderVideoTargets();$('#video-count').textContent=players.size+' selected';$('#video-empty').style.display=players.size?'none':'block';}
 function videoTargets(id){return controlTargets().filter(r=>r.stream_id===id&&!r.missing_settop);}
 function selectVideoRemote(id){
  const linked=videoTargets(id);
  if(linked.length===1){selectTarget(linked[0].id);return;}
- if(linked.length>1&&!linked.some(r=>r.id===active))notice('This stream has multiple remotes. Choose its Control button below the video.');
+ if(linked.length>1){const current=linked.find(r=>r.id===active);if(current){if(multiControl)selectTarget(current.id);}else notice('This stream has multiple remotes. Choose its Control button below the video.');}
 }
 function renderVideoTargets(){
  for(const [id,p]of players){
@@ -48,11 +86,11 @@ function renderVideoTargets(){
    for(const r of linked){const b=button('',()=>selectTarget(r.id),'video-control');b.dataset.remoteId=r.id;b.title=r.name+' controls '+r.stb_alias;p.targets.append(b);}
   }
   for(const b of p.targets.querySelectorAll('button')){
-   const r=linked.find(r=>r.id===b.dataset.remoteId),chosen=r.id===active;
-   b.textContent=(chosen?'Controlling: ':'Control: ')+r.name;
+   const r=linked.find(r=>r.id===b.dataset.remoteId),chosen=multiControl?selectedTargets.has(r.stb_alias):r.id===active;
+   b.textContent=(chosen?(multiControl?'Selected: ':'Controlling: '):'Control: ')+r.name;
    b.classList.toggle('active',chosen);b.setAttribute('aria-pressed',String(chosen));
   }
-  p.card.classList.toggle('remote-active',linked.some(r=>r.id===active));
+  p.card.classList.toggle('remote-active',linked.some(r=>multiControl?selectedTargets.has(r.stb_alias):r.id===active));
   p.card.setAttribute('aria-label',p.title.textContent+(linked.length?' · select linked remote':' · video only'));
  }
 }
@@ -109,12 +147,15 @@ function portField(value=''){
  select.append(option(value,value||'No serial port'));box.append(select,input,scan,status);scan.click();return box;
 }
 async function refreshHistory(){
- const alias=$('#history-all').checked?null:activeTarget()?.stb_alias;
- if(!alias&&!$('#history-all').checked){$('#command-history').replaceChildren();$('#history-count').textContent='0 recent commands';return;}
- const j=await api('/api/vision/commands'+(alias?'?alias='+encodeURIComponent(alias):''));
- if(alias!==($('#history-all').checked?null:activeTarget()?.stb_alias))return;
- const rows=j.commands.map(c=>{const tr=el('tr');tr.dataset.status=c.status;tr.append(td(new Date(c.started_at).toLocaleString()),td(c.alias),td(c.button),td((c.via||c.transport)+' · '+c.duration+' ms'),td(c.status+(c.elapsed_ms===null?'':' · '+c.elapsed_ms+' ms')),td(c.message));return tr;});
- $('#command-history').replaceChildren(...rows);$('#history-count').textContent=j.commands.length+' recent commands';
+ const group=multiControl&&!$('#history-all').checked?commandAliases():null;
+ const alias=$('#history-all').checked||group?null:activeTarget()?.stb_alias;
+ if((group&&!group.length)||(!alias&&!$('#history-all').checked&&!group)){$('#command-history').replaceChildren();$('#history-count').textContent='0 recent commands';return;}
+ const query=group?'?'+group.map(a=>'alias='+encodeURIComponent(a)).join('&'):(alias?'?alias='+encodeURIComponent(alias):'');
+ const j=await api('/api/vision/commands'+query);
+ if(group?JSON.stringify(group)!==JSON.stringify(commandAliases()):alias!==($('#history-all').checked?null:activeTarget()?.stb_alias))return;
+ const filtered=group?j.commands.filter(c=>group.includes(c.alias)):j.commands;
+ const rows=filtered.map(c=>{const tr=el('tr');tr.dataset.status=c.status;tr.append(td(new Date(c.started_at).toLocaleString()),td(c.alias),td(c.button),td((c.via||c.transport)+' · '+c.duration+' ms'),td(c.status+(c.elapsed_ms===null?'':' · '+c.elapsed_ms+' ms')),td(c.message));return tr;});
+ $('#command-history').replaceChildren(...rows);$('#history-count').textContent=filtered.length+' recent commands';
 }
 $('#history-all').onchange=run(refreshHistory);$('#refresh-history').onclick=run(refreshHistory);
 setInterval(()=>run(refreshHistory)(),3000);

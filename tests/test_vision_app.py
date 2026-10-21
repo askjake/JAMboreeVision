@@ -339,3 +339,75 @@ def test_dart_management_wire_and_history(client, monkeypatch, key, number, prof
     row=client.get('/api/vision/commands?alias=H').json['commands'][0]
     assert row['button']==key and row['transport']=='rf' and row['duration']==0
     assert row['status']=='sent' and 'not confirmed' in row['message']
+
+
+def batch_targets(client):
+    seed(client)
+    assert client.post('/api/vision/settops',json={'alias':'J','protocol':'SGS','role':'hopper','com_port':'COM4'}).status_code==200
+    import jamboree.app as legacy
+    legacy.store.update_stb('H',{'com_port':'COM3'})
+
+
+def test_batch_validation_deduplication_and_partial_failure(client,monkeypatch):
+    import jamboree.app as legacy
+    batch_targets(client)
+    def send(remote,alias,*args,**kwargs):
+        if alias=='H':raise RuntimeError('fixture disconnected')
+        return {'ok':True,'via':'sgs'}
+    fn=Mock(side_effect=send);monkeypatch.setattr(legacy.ctl,'handle_auto_remote',fn)
+    route='/api/vision/commands/batch'
+    for aliases in [[],['H','missing'],['H']*33,'H',[1]]:
+        assert client.post(route,json={'button':'guide','aliases':aliases}).status_code==400
+    fn.assert_not_called()
+    result=client.post(route,json={'button':'guide','aliases':['H','h','J']}).json
+    assert result['ok'] and result['sent']==1 and result['failed']==1
+    assert [r['alias'] for r in result['results']]==['H','J'] and fn.call_count==2
+    assert result['results'][0]['error']=='fixture disconnected'
+    rows={r['id']:r for r in client.get('/api/vision/commands?alias=H&alias=J').json['commands']}
+    assert rows[result['results'][0]['history_id']]['status']=='failed'
+    assert rows[result['results'][1]['history_id']]['status']=='sent'
+
+
+def test_batch_independent_connections_overlap_and_exclude_other_commands(client,app,monkeypatch):
+    import threading
+    import jamboree.app as legacy
+    batch_targets(client)
+    barrier=threading.Barrier(2)
+    def send(*args,**kwargs):
+        with app.test_client() as other:
+            assert other.post('/api/vision/settops/H/command',json={'button':'guide'}).status_code==409
+            assert other.post('/api/vision/commands/batch',json={'button':'guide','aliases':['H']}).status_code==409
+        barrier.wait(timeout=3)
+        return {'ok':True,'via':'rf'}
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',send)
+    result=client.post('/api/vision/commands/batch',json={'button':'guide','aliases':['H','J'],'transport':'rf'}).json
+    assert result['sent']==2 and result['failed']==0
+    # The batch gate is released after completion.
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',Mock(return_value={'ok':True,'via':'sgs'}))
+    assert client.post('/api/vision/settops/H/command',json={'button':'guide'}).status_code==200
+
+
+def test_batch_shared_port_sequences_whole_commands(client,monkeypatch):
+    import time
+    import jamboree.app as legacy
+    batch_targets(client);legacy.store.update_stb('J',{'com_port':'com3'})
+    events=[]
+    def send(remote,alias,*args,**kwargs):
+        events.append(('start',alias));time.sleep(.03);events.append(('end',alias))
+        return {'ok':True,'via':'rf'}
+    monkeypatch.setattr(legacy.ctl,'handle_auto_remote',send)
+    assert client.post('/api/vision/commands/batch',json={'button':'guide','aliases':['H','J'],'transport':'rf'}).json['sent']==2
+    assert events==[('start','H'),('end','H'),('start','J'),('end','J')]
+
+
+@pytest.mark.parametrize('key',['reset','allup','unpair'])
+def test_batch_management_commands_are_dart_even_with_sgs_selected(client,monkeypatch,key):
+    import jamboree.app as legacy
+    batch_targets(client)
+    fn=Mock(return_value={'ok':True,'via':'dart'})
+    monkeypatch.setattr(legacy.ctl,'dart',fn);monkeypatch.setattr(legacy.ctl,'unpair',fn)
+    result=client.post('/api/vision/commands/batch',json={'button':key,'aliases':['H','J'],'transport':'sgs','combo':'home'}).json
+    assert result['sent']==2
+    assert {c.args[0] for c in fn.call_args_list}=={'H','J'}
+    for call in fn.call_args_list:
+        assert call.kwargs=={'combo':'home'} if key=='unpair' else call.args[1:]==(key,key)

@@ -97,6 +97,32 @@ secondCard.querySelector('video').click();assert.equal(d.querySelector('#active-
 w.fetch=normalFetch;
 console.log('PASS: video/keyboard remote selection, actual command target, active highlighting, shared choices, unlinked video, live-button independence');
 
+// Opt-in group control deduplicates profiles and reports individual outcomes.
+const multi=d.querySelector('#multi-control');multi.click();assert.equal(d.querySelector('#active-remote-name').textContent,'1 settops selected');
+d.querySelector('#remote-list input[data-alias="DOM Hopper"]').click();
+assert.equal(d.querySelector('#active-remote-name').textContent,'2 settops selected');
+assert.equal(d.querySelector('#remote-list input[aria-label="Control Second Remote"]').checked,true);
+assert.equal(d.querySelector('#remote-list input[aria-label="Control Shared Remote"]').checked,true);
+assert.equal(d.querySelector('#console-link').disabled,true);
+const beforeBatch=(await(await fetch(cfg.url+'/_test/commands')).json()).commands.length;
+d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#batch-results').children.length===2&&!d.querySelector('[data-key=guide]').disabled);
+assert.match(d.querySelector('#command-status').textContent,/2 sent · 0 failed/);
+const batchCommands=(await(await fetch(cfg.url+'/_test/commands')).json()).commands.slice(beforeBatch);
+assert.equal(batchCommands.length,2);assert.deepEqual(batchCommands.map(c=>c.args[1]).sort(),['DOM Hopper','Second Hopper']);
+const batchFetch=w.fetch;
+w.fetch=(p,o)=>String(p).endsWith('/commands/batch')?Promise.resolve({ok:true,json:async()=>({ok:true,sent:1,failed:1,results:[{alias:'DOM Hopper',ok:true,via:'sgs',feedback:'fixture',status:'sent'},{alias:'Second Hopper',ok:false,error:'fixture disconnected',status:'failed'}]})}):batchFetch(p,o);
+d.querySelector('[data-key=guide]').click();await wait(()=>d.querySelector('#batch-results [data-status=failed]'));
+assert.match(d.querySelector('#command-status').textContent,/1 sent · 1 failed/);assert.match(d.querySelector('#batch-results').textContent,/Second Hopper: Failed/);
+w.fetch=batchFetch;
+d.querySelector('#clear-targets').click();assert.equal(d.querySelector('[data-key=guide]').disabled,true);
+firstCard.querySelector('video').click();assert.equal(d.querySelector('#active-remote-name').textContent,'1 settops selected');
+assert.equal(firstCard.classList.contains('remote-active'),true);
+d.querySelector('#clear-targets').click();d.querySelector('#remote-search').value='DOM';d.querySelector('#remote-search').dispatchEvent(new w.Event('input'));
+d.querySelector('#select-visible-targets').click();assert.equal(d.querySelector('#active-remote-name').textContent,'1 settops selected');
+d.querySelector('#remote-search').value='';d.querySelector('#remote-search').dispatchEvent(new w.Event('input'));
+multi.click();assert.notEqual(d.querySelector('#active-remote-name').textContent,'1 settops selected');assert.equal(d.querySelector('[data-key=guide]').disabled,false);
+console.log('PASS: multi-select opt-in, duplicate profiles, batch destinations/results, partial failure, clear/select-visible, video selection, single-mode return');
+
 const picker=d.querySelector('#config-file');let pickerClicked=false;picker.click=()=>{pickerClicked=true};d.querySelector('#import-config').click();assert.equal(pickerClicked,true);
 const config=JSON.stringify({stbs:{'Imported Hopper':{protocol:'SGS',ip:'192.0.2.1'}}});
 async function choose(text){Object.defineProperty(picker,'files',{configurable:true,value:[{name:'base.txt',size:text.length,text:async()=>text}]});await picker.onchange();}

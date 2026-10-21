@@ -83,9 +83,14 @@ class Assets:
             c.execute('UPDATE command_history SET status=?,via=?,elapsed_ms=?,message=? WHERE id=?',
                       (status, via, elapsed_ms, message, ident))
 
-    def history(self, alias=None):
+    def history(self, alias=None, aliases=None):
         with self.db() as c:
-            if alias is not None:
+            if aliases is not None:
+                if not aliases:
+                    return []
+                slots = ','.join('?' for _ in aliases)
+                rows = c.execute(f'SELECT * FROM command_history WHERE alias IN ({slots}) ORDER BY id DESC LIMIT 100', tuple(aliases))
+            elif alias is not None:
                 rows = c.execute('SELECT * FROM command_history WHERE alias=? ORDER BY id DESC LIMIT 100', (alias,))
             else:
                 rows = c.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT 100')
