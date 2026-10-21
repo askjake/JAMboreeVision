@@ -23,7 +23,6 @@ from serial.tools import list_ports
 
 LOG = logging.getLogger("serial-manager")
 DEFAULT_BAUD = 115200
-STALL_RESET_S = 30.0
 REOPEN_BACKOFFS = (1, 2, 5, 10, 20, 30, 60)
 READ_TIMEOUT_S = 0.25
 WRITE_TIMEOUT_S = 1.0
@@ -140,7 +139,7 @@ class SerialPortWorker(threading.Thread):
                 self._close_serial()
                 return False
             with contextlib.suppress(Exception):
-                self._ser.reset_input_buffer()
+                # Preserve the board boot/version banner for the RX log.
                 self._ser.reset_output_buffer()
             self.last_error = None
             self._last_activity = time.monotonic()
@@ -171,25 +170,6 @@ class SerialPortWorker(threading.Thread):
             request.ok = False
             request.done.set()
             self._write_q.task_done()
-
-    def _soft_reset(self) -> None:
-        if not self._ser:
-            return
-        try:
-            self._ready.clear()
-            self._ser.dtr = False
-            time.sleep(0.2)
-            self._ser.dtr = True
-            time.sleep(2.0)
-            with contextlib.suppress(Exception):
-                self._ser.reset_input_buffer()
-                self._ser.reset_output_buffer()
-            self._last_activity = time.monotonic()
-            self._ready.set()
-        except Exception as exc:
-            self.last_error = str(exc)
-            LOG.error("[%-6s] DTR reset failed: %s", self.com, exc)
-            self._close_serial()
 
     def _drain_writes(self) -> bool:
         """Write queued requests; return False if the port failed."""
@@ -257,8 +237,9 @@ class SerialPortWorker(threading.Thread):
 
                 if self._stop_event.is_set():
                     break
-                if time.monotonic() - self._last_activity > STALL_RESET_S:
-                    self._soft_reset()
+                # Quiet serial traffic is normal between remote commands.
+                # Never reboot hardware merely because it is idle; actual
+                # read/write failures still close and reopen the connection.
         finally:
             self._close_serial()
             self._fail_pending("serial worker exited")

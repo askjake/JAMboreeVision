@@ -137,3 +137,60 @@ def test_read_failure_reopens_port(monkeypatch, caplog):
     worker.run()
     assert not broken.is_open and not replacement.is_open
     assert 'read failed' in caplog.text
+
+
+def test_idle_port_does_not_toggle_dtr_and_still_sends(monkeypatch):
+    worker = serial_manager.SerialPortWorker('COM1')
+    class QuietSerial(FakeSerial):
+        def __init__(self):
+            super().__init__()
+            self.reads = 0
+            self.dtr_changes = []
+        @property
+        def dtr(self):
+            return True
+        @dtr.setter
+        def dtr(self, value):
+            self.dtr_changes.append(value)
+        def readline(self):
+            self.reads += 1
+            if self.reads == 2:
+                assert worker.submit(b'2 83 03 120\n',wait=False)
+            if self.reads == 3:
+                worker._stop_event.set()
+            return b''
+    device = QuietSerial()
+    worker._ser = device
+    worker._ready.set()
+    worker._last_activity = -1000
+    monkeypatch.setattr(serial_manager.time,'monotonic',lambda:1000000)
+    worker.run()
+    assert device.dtr_changes == []
+    assert device.writes == [b'2 83 03 120\n']
+    assert device.reads == 3 and not device.is_open
+
+
+def test_open_preserves_boot_banner_in_rx_log(monkeypatch,caplog):
+    import logging
+    worker = serial_manager.SerialPortWorker('COM1')
+    class BootSerial(FakeSerial):
+        def __init__(self):
+            super().__init__()
+            self.boot = b'11.05.2024 fixture DART version\r\n'
+            self.cleared_input = False
+        def reset_input_buffer(self):
+            self.cleared_input = True
+            self.boot = b''
+        def reset_output_buffer(self):
+            pass
+        def readline(self):
+            worker._stop_event.set()
+            return self.boot
+    device = BootSerial()
+    monkeypatch.setattr(serial_manager.serial,'Serial',lambda **kwargs:device)
+    monkeypatch.setattr(worker._stop_event,'wait',lambda timeout:False)
+    assert worker._open_serial()
+    caplog.set_level(logging.INFO,logger='serial-manager')
+    worker.run()
+    assert not device.cleared_input
+    assert 'fixture DART version' in caplog.text

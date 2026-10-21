@@ -398,3 +398,12 @@ best-effort control, not synchronized/frame-accurate receiver execution. Another
 console command/batch is rejected while a batch is running, preserving the existing
 command exclusion contract. Selection and playback remain usable during dispatch.
 No database schema migration is needed.
+
+
+## DART idle-response diagnosis
+
+Removed the serial worker's automatic DTR reset after 30 seconds of inactivity;
+quiet ports now stay open without periodic hardware resets. Startup RX banners
+are preserved instead of discarded. Read/write-error reconnect behavior remains.
+See [DART diagnosis and Arduino IDE port handoff](docs/DART-TROUBLESHOOTING.md) for firmware
+identification, the field-log interpretation, and reproducible idle testing.
