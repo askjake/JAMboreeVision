@@ -3,8 +3,8 @@
 #define DART_VERSION_H
 
 #define DART_FW_NAME      "DART-BRIDGE"
-#define DART_FW_VERSION   "2.0.0"
-#define DART_FW_DATE      "2026-10-21"
+#define DART_FW_VERSION   "2.0.1"
+#define DART_FW_DATE      "2026-10-22"
 /* Protocol revision of the host<->board serial contract (not the I2C contract). */
 #define DART_SERIAL_PROTO "3"
 /* I2C contract revision: 1 == byte-for-byte compatible with the legacy

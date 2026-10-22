@@ -64,3 +64,14 @@ clean:
 	$(MAKE) -C emu clean
 
 .PHONY: all run sanitize reference vision emulate all-layers clean
+
+# Recovery regressions include the actual sketch adapter with a 63-byte UART.
+recovery:
+	$(CXX) $(CXXFLAGS) -o /tmp/dart-pulse-regression pulse_regression.cpp ../dart_remote_bridge/dart_core.cpp
+	/tmp/dart-pulse-regression
+	$(CXX) $(CXXFLAGS) -o /tmp/dart-serial-regression serial_tx_test.cpp ../dart_remote_bridge/dart_core.cpp
+	/tmp/dart-serial-regression
+	$(CXX) $(CXXFLAGS) -DDART_BOARD_NANO_EVERY=1 -Iarduino_mock -o /tmp/dart-adapter-regression adapter_test.cpp ../dart_remote_bridge/dart_core.cpp
+	/tmp/dart-adapter-regression
+
+.PHONY: recovery

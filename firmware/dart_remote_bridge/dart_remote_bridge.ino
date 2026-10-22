@@ -20,6 +20,7 @@
 #include "dart_board_config.h"
 #include "dart_core.h"
 #include "dart_hal.h"
+#include "dart_serial_tx.h"
 
 /* ---------------------------------------------------------------------
  * Hardware mapping.  Kept identical to the legacy DART_Dumb.ino and to
@@ -86,15 +87,11 @@ class ArduinoDartHal : public DartHal {
     digitalWrite(kSharedResetPin, high ? HIGH : LOW);
   }
 
-  /* Never block.  The reference sketch printed unconditionally, so with debug
-   * enabled a full 64-byte TX FIFO stalled the main loop and therefore the ACK
-   * and release deadlines.  A message that does not fit is dropped whole, so
-   * lines are never truncated, and the loss is counted and reported. */
+  DartSerialTx tx;
   void print(const char* text) override {
-    const size_t n = strlen(text);
-    if ((size_t)Serial.availableForWrite() < n) { txDropped++; return; }
-    Serial.write(reinterpret_cast<const uint8_t*>(text), n);
+    if (!tx.enqueue(text)) txDropped++;
   }
+  void serviceTx() { tx.pump(Serial); }
 
   /* Save and RESTORE: the reference sketch called interrupts()
    * unconditionally, which enables interrupts even if they were disabled. */
@@ -150,6 +147,7 @@ void setup() {
 }
 
 void loop() {
+  gHal.serviceTx();
   /* Drain the UART first, then advance the engine.  Both are non-blocking, so
    * a pending release deadline is never delayed by serial traffic and vice
    * versa.  Reading a bounded batch keeps one burst from starving tick(). */
@@ -164,7 +162,8 @@ void loop() {
     char buf[48];
     snprintf(buf, sizeof(buf), "[DROP] %lu log lines dropped\r\n",
              (unsigned long)gHal.txDropped);
-    gHal.txDropped = 0;
-    gHal.print(buf);
+    /* Do not erase the count until the report itself is admitted. */
+    if (gHal.tx.enqueue(buf)) gHal.txDropped = 0;
   }
+  gHal.serviceTx();
 }
