@@ -1,0 +1,11 @@
+# Build output of the firmware verification layers.
+test/dart_tests
+test/dart_tests_asan
+test/pty_sim
+test/reference/ref_defect_tests
+test/reference/ref_defect_tests_asan
+test/reference/diag
+test/reference/diag2
+test/emu/*.elf
+*.su
+*.o

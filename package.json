@@ -1,0 +1,13 @@
+{
+  "name": "jamboreevision-tests",
+  "private": true,
+  "scripts": {
+    "test:dom": "node tests/dom_flow.cjs",
+    "test:browser": "node tests/browser_flow.cjs",
+    "test:player": "node --test tests/live_player.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "playwright": "1.51.1"
+  }
+}

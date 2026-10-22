@@ -1,0 +1,17 @@
+{
+  "jamboree_lite": {
+    "repository": "askjake/JAMboreeLite",
+    "commit": "ec197967a8041836584c46a1cc6128e6e4eaae65",
+    "omissions": [
+      "private certificate/key material",
+      "bytecode caches",
+      "binary UI images",
+      "obsolete installers and installer-only tests"
+    ]
+  },
+  "sling_viewer": {
+    "repository": "askjake/Sling-viewer",
+    "commit": "d8f3ddb1ac2dc9b1b0dc2c7fa28b6736088176e6",
+    "integration": "Reimplemented fixed Streamlit/FFmpeg launcher as managed same-origin multi-view playback and bounded discovery."
+  }
+}
