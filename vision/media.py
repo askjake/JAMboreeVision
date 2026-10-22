@@ -13,11 +13,10 @@ from .assets import stream_url
 
 
 def input_args(url):
-    protocol = urlsplit(url).scheme
-    args = ['-rw_timeout', '5000000']
+    protocol = urlsplit(url).scheme.lower()
     if protocol in {'rtsp', 'rtsps'}:
-        args += ['-rtsp_transport', 'tcp']
-    return args
+        return ['-rtsp_transport', 'tcp', '-stimeout', '5000000']
+    return ['-rw_timeout', '5000000']
 
 
 def probe(url, executable='ffprobe'):
