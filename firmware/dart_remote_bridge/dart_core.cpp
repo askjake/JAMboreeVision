@@ -99,7 +99,7 @@ DartCore::DartCore(DartHal& hal)
       isrReads_(0), isrAckEarly_(0), isrAckStray_(0), isrAckDuplicate_(0),
       isrInitExchanges_(0),
       txnRemote_(0), txnPurpose_(DART_PURPOSE_DOWN), txnSlot_(-1), txnTag_(0),
-      txnTriggerTry_(0), txnDeadline_(0), txnPulseUntil_(0), nextWorkAt_(0),
+      txnTriggerTry_(0), txnDeadline_(0), txnPulseActive_(false), txnPulseUntil_(0), nextWorkAt_(0),
       resetUntil_(0), resetting_(false),
       qHead_(0), qTail_(0), lineLen_(0), lineOverflow_(false),
       debug_(false), ackTimeoutMs_(DART_ACK_TIMEOUT_MS_DEFAULT),
@@ -486,8 +486,10 @@ void DartCore::beginTxn(uint8_t remote1, uint8_t key, uint8_t purpose,
   /* Pulse the channel's interrupt line LOW -> HIGH.  Non-blocking: the HIGH
    * edge happens in tick() once txnPulseUntil_ elapses, so a 2 ms pulse never
    * delays serial handling or another channel's release deadline. */
-  hal_.writeChannel((uint8_t)(remote1 - 1), false);
   txnPulseUntil_ = hal_.millis() + DART_PULSE_LOW_MS;
+  txnDeadline_ = txnPulseUntil_ + ackTimeoutMs_;
+  txnPulseActive_ = true;
+  hal_.writeChannel((uint8_t)(remote1 - 1), false);
 
   if (debug_) {
     char buf[72];
@@ -501,6 +503,10 @@ void DartCore::cancelTxnPresentation() {
   /* Stop presenting the key immediately.  This is the single most important
    * difference from the reference sketch: there is no residual queued event
    * that a later read by ANOTHER remote could consume. */
+  if (txnPulseActive_) {
+    hal_.writeChannel((uint8_t)(txnRemote_ - 1), true);
+    txnPulseActive_ = false;
+  }
   DartCritical cs(hal_);
   txnStage_ = DART_TXN_IDLE;
   txnKey_ = DART_I2C_KEY_NONE;
@@ -550,7 +556,16 @@ void DartCore::finishTxn(uint8_t outcome) {
         k.upAttempts++;
         if (k.upAttempts >= DART_RELEASE_RETRIES_MAX) {
           /* Bounded.  Stop retrying and say so instead of looping forever or
-           * resetting every remote because one release failed. */
+           * resetting every remote because one release failed.
+           * REGRESSION #8: do NOT force the slot to DART_KEY_FREE here. The
+           * release itself was never confirmed, so we do not know the key is
+           * actually up; forcing FREE previously let a fresh DOWN reuse the
+           * slot (and a duplicate DOWN report "confirmed") while the physical
+           * remote might still be holding the old key. Leave k.state as-is
+           * (CONFIRMED or UNCERTAIN) so findSlot()/duplicate-DOWN reporting
+           * and release-all keep treating it as held pending an explicit
+           * "<r> 99 reset". startReleaseWork() stops auto-retrying it once
+           * upAttempts reaches the bound (see matching guard there). */
           char buf[96];
           snprintf(buf, sizeof(buf),
                    "[WARN] r=%u up=0x%02X unreleased after %u tries; "
@@ -558,7 +573,6 @@ void DartCore::finishTxn(uint8_t outcome) {
                    (unsigned)remote, (unsigned)k.upCmd,
                    (unsigned)k.upAttempts, (unsigned)remote);
           hal_.print(buf);
-          k.state = DART_KEY_FREE;
         } else {
           /* Re-arm: due immediately, paced by nextWorkAt_. */
           k.holdMs = 0;
@@ -580,6 +594,14 @@ bool DartCore::startReleaseWork() {
     for (uint8_t s = 0; s < DART_HELD_SLOTS; ++s) {
       DartHeldKey& k = held_[r - 1][s];
       if (k.state == DART_KEY_FREE) continue;
+      /* REGRESSION #8 (companion guard): a slot whose release retries were
+       * already exhausted (see finishTxn) stays tracked as held/uncertain on
+       * purpose, but must not be auto-retried again here - only an explicit
+       * "<r> 99 reset" or a fresh release-all (which clears upAttempts) may
+       * re-arm it. Without this guard the slot would be picked up again
+       * immediately, which is exactly the unbounded retry loop the original
+       * exhaustion check was meant to prevent. */
+      if (k.upAttempts >= DART_RELEASE_RETRIES_MAX) continue;
       /* Unsigned difference: correct across the 2^32 ms wraparound. */
       const uint32_t age = now - k.holdStart;
       uint32_t limit;
@@ -664,13 +686,19 @@ bool DartCore::startQueuedCommand() {
         int8_t slot = findSlot(c.remote, c.downCmd);
         if (slot >= 0) {
           /* Duplicate DOWN for a key already held: refresh the deadline
-           * instead of pressing twice or rejecting the whole command. */
+           * instead of pressing twice or rejecting the whole command.
+           * REGRESSION #9: findSlot() matches CONFIRMED and UNCERTAIN alike,
+           * so report the slot's actual state instead of hardcoding
+           * "confirmed" - an uncertain key must stay reported as uncertain
+           * even on a duplicate DOWN, or the host loses the only signal that
+           * the original press was never acknowledged. */
           DartHeldKey& k = held_[c.remote - 1][slot];
           k.holdMs = c.holdMs;
           k.holdStart = hal_.millis();
+          const char* dupResult = (k.state == DART_KEY_CONFIRMED) ? "confirmed" : "uncertain";
           char buf[72];
-          snprintf(buf, sizeof(buf), "[EVT] r=%u key=0x%02X act=down result=confirmed id=%u\r\n",
-                   (unsigned)c.remote, (unsigned)c.downCmd, (unsigned)c.tag);
+          snprintf(buf, sizeof(buf), "[EVT] r=%u key=0x%02X act=down result=%s id=%u\r\n",
+                   (unsigned)c.remote, (unsigned)c.downCmd, dupResult, (unsigned)c.tag);
           hal_.print(buf);
           continue;
         }
@@ -721,22 +749,20 @@ void DartCore::tick() {
     return;
   }
 
+  /* Reads/ACKs may arrive while LOW. They must not skip the HIGH edge or
+   * completion deadline. Finish the physical pulse independently of ISR state. */
+  if (txnPulseActive_) {
+    if ((int32_t)(now - txnPulseUntil_) < 0) return;
+    hal_.writeChannel((uint8_t)(txnRemote_ - 1), true);
+    txnPulseActive_ = false;
+    DartCritical cs(hal_);
+    if (txnStage_ == DART_TXN_PULSE_LOW) txnStage_ = DART_TXN_PRESENTED;
+  }
+
   uint8_t stage;
   { DartCritical cs(hal_); stage = txnStage_; }
 
   if (stage == DART_TXN_IDLE) { startNextWork(); return; }
-
-  if (stage == DART_TXN_PULSE_LOW) {
-    if ((int32_t)(now - txnPulseUntil_) < 0) return;
-    hal_.writeChannel((uint8_t)(txnRemote_ - 1), true);
-    { DartCritical cs(hal_);
-      /* A read may already have happened during the LOW window; only advance
-       * from PULSE_LOW so we never rewind a READ/ACKED stage. */
-      if (txnStage_ == DART_TXN_PULSE_LOW) txnStage_ = DART_TXN_PRESENTED;
-    }
-    txnDeadline_ = now + ackTimeoutMs_;
-    return;
-  }
 
   if (stage == DART_TXN_ACKED) { finishTxn(DART_OUTCOME_CONFIRMED); return; }
 

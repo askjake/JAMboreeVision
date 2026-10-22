@@ -208,6 +208,7 @@ class DartCore {
   uint16_t txnTag_;
   uint8_t  txnTriggerTry_;
   uint32_t txnDeadline_;
+  bool     txnPulseActive_; /* independent of ISR-updated transaction stage */
   uint32_t txnPulseUntil_;
   uint32_t nextWorkAt_;     /* retry pacing without blocking */
   uint32_t resetUntil_;     /* shared-reset pulse deadline */

@@ -611,6 +611,81 @@ static void test_duplicates() {
     CHECK_EQ(b.master[0].keysSeen.size(), 1u);
     CHECK_EQ(b.master[0].keyAt(0), 0x6F);
   }
+
+  TEST("duplicate DOWN on an uncertain key reports uncertain, never a false "
+       "confirmed (REGRESSION #9)");
+  {
+    DartBus b; b.begin();
+    b.master[0].doAck = false;           /* every DOWN/UP on this master reads
+                                           * fine but never acknowledges */
+    b.send("1 4 down"); b.settle();
+    CHECK(b.hal.sawOut("act=down result=uncertain"));
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_UNCERTAIN);
+    b.hal.clearOut();
+    b.send("1 4 down"); b.settle();      /* duplicate DOWN while still uncertain */
+    CHECK_EQ(b.hal.fallingEdges(0), 1);  /* still refreshed, not re-pressed */
+    CHECK(b.hal.sawOut("act=down result=uncertain"));
+    CHECK(!b.hal.sawOut("act=down result=confirmed"));
+
+    /* Once the key really is confirmed, a duplicate DOWN must still (and
+     * correctly) report confirmed - this is not a blanket switch to
+     * "always uncertain". */
+    b.master[0].doAck = true;
+    b.send("1 86 allup"); b.settle();
+    CHECK_EQ(b.core.heldCount(1), 0);
+    b.send("1 4 down"); b.settle();
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_CONFIRMED);
+    b.hal.clearOut();
+    b.send("1 4 down"); b.settle();
+    CHECK(b.hal.sawOut("act=down result=confirmed"));
+  }
+
+  TEST("exhausted release retries keep an uncertain key tracked, not "
+       "silently freed (REGRESSION #8)");
+  {
+    DartBus b; b.begin();
+    b.master[0].doAck = false;           /* the DOWN itself is already uncertain */
+    b.send("1 4 down"); b.settle();
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_UNCERTAIN);
+    b.send("1 4 up");
+    b.settle();                          /* run all DART_RELEASE_RETRIES_MAX tries,
+                                           * every one of them uncertain too */
+    CHECK(b.hal.sawOut("unreleased after"));
+    CHECK_EQ(b.core.heldCount(1), 1);                       /* NOT silently freed */
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_UNCERTAIN);  /* unchanged, not FREE */
+
+    /* The automatic scheduler must not keep retrying beyond the bound. */
+    int warnBefore = b.hal.countOut("unreleased after");
+    b.advance(5000);
+    CHECK_EQ(b.hal.countOut("unreleased after"), warnBefore);
+
+    /* An explicit release-all still reaches and clears it (deliberate cleanup). */
+    b.master[0].doAck = true;
+    b.send("1 86 allup"); b.settle();
+    CHECK_EQ(b.core.heldCount(1), 0);
+  }
+
+  TEST("exhausted release retries on a CONFIRMED key leave it CONFIRMED, "
+       "not silently freed (REGRESSION #8)");
+  {
+    DartBus b; b.begin();
+    b.send("1 4 down"); b.settle();      /* this DOWN really was confirmed */
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_CONFIRMED);
+    b.master[0].doAck = false;           /* but every release attempt is uncertain */
+    b.send("1 4 up");
+    b.settle();
+    CHECK(b.hal.sawOut("unreleased after"));
+    CHECK_EQ(b.core.heldCount(1), 1);                       /* NOT silently freed */
+    /* The press itself is still known-confirmed; only the release is
+     * unresolved, so a duplicate DOWN for this key correctly keeps
+     * reporting confirmed (see REGRESSION #9 test), not a fabricated
+     * uncertainty. */
+    CHECK_EQ(b.core.held(1, 0).state, DART_KEY_CONFIRMED);
+
+    b.master[0].doAck = true;
+    b.send("1 86 allup"); b.settle();
+    CHECK_EQ(b.core.heldCount(1), 0);
+  }
 }
 
 /* ====================================================================== */
